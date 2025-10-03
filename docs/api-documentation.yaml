@@ -1,0 +1,1613 @@
+openapi: 3.0.3
+info:
+  title: ActionLoom AI Agent API
+  description: |
+    ActionLoom AI Agent API provides programmatic access to blockchain workflow composition, 
+    Action discovery, and Agent management capabilities. This API is designed for AI agents, 
+    trading bots, and automated systems to integrate with Flow blockchain automation.
+    
+    ## Authentication
+    All API endpoints require authentication using API keys. Include your API key in the 
+    Authorization header as a Bearer token:
+    
+    ```
+    Authorization: Bearer al_your_api_key_here
+    ```
+    
+    ## Rate Limits
+    API requests are rate-limited based on your subscription tier:
+    
+    - **Free Tier**: 10 requests/minute, 100 requests/hour, 1,000 requests/day
+    - **Pro Tier**: 100 requests/minute, 5,000 requests/hour, 50,000 requests/day  
+    - **Enterprise Tier**: 1,000 requests/minute, 50,000 requests/hour, 1,000,000 requests/day
+    
+    Rate limit information is included in response headers:
+    - `X-RateLimit-Remaining-Minute`: Remaining requests this minute
+    - `X-RateLimit-Remaining-Hour`: Remaining requests this hour
+    - `X-RateLimit-Remaining-Day`: Remaining requests today
+    
+    ## Error Handling
+    The API uses standard HTTP status codes and returns consistent error responses:
+    
+    ```json
+    {
+      "success": false,
+      "error": "Error description",
+      "details": "Additional error details"
+    }
+    ```
+    
+    Common status codes:
+    - `200`: Success
+    - `400`: Bad Request - Invalid parameters
+    - `401`: Unauthorized - Missing or invalid API key
+    - `403`: Forbidden - Insufficient permissions
+    - `404`: Not Found - Resource not found
+    - `429`: Too Many Requests - Rate limit exceeded
+    - `500`: Internal Server Error
+    
+  version: 1.0.0
+  contact:
+    name: ActionLoom Support
+    email: support@actionloom.com
+    url: https://actionloom.com/support
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.actionloom.com/v1
+    description: Production server
+  - url: https://api-staging.actionloom.com/v1
+    description: Staging server
+  - url: http://localhost:3000/api
+    description: Development server
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /compose:
+    post:
+      summary: Compose Workflow
+      description: |
+        Create and validate blockchain workflows from natural language or structured input.
+        This endpoint accepts either natural language descriptions or structured workflow 
+        definitions and returns validated workflows with generated Cadence code.
+      operationId: composeWorkflow
+      tags:
+        - Workflow Composition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComposeRequest'
+            examples:
+              naturalLanguage:
+                summary: Natural Language Input
+                value:
+                  naturalLanguage: "Swap 100 USDC to FLOW and stake in PoolX"
+                  options:
+                    validate: true
+                    generateCadence: true
+                  metadata:
+                    name: "DeFi Strategy"
+                    description: "Automated swap and stake workflow"
+              structuredWorkflow:
+                summary: Structured Workflow
+                value:
+                  workflow:
+                    actions:
+                      - id: "swap1"
+                        actionType: "swap"
+                        name: "Swap USDC to FLOW"
+                        parameters:
+                          - name: "fromToken"
+                            type: "string"
+                            value: "USDC"
+                            required: true
+                          - name: "toToken"
+                            type: "string"
+                            value: "FLOW"
+                            required: true
+                          - name: "amount"
+                            type: "number"
+                            value: "100"
+                            required: true
+                        nextActions: []
+                        position:
+                          x: 0
+                          y: 0
+                    executionOrder: ["swap1"]
+                    rootActions: ["swap1"]
+                    metadata:
+                      totalActions: 1
+                      totalConnections: 0
+                      createdAt: "2024-01-01T00:00:00Z"
+                  options:
+                    validate: true
+                    generateCadence: true
+      responses:
+        '200':
+          description: Workflow composed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComposeResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - Invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /actions:
+    get:
+      summary: Discover Actions
+      description: |
+        Discover and search available blockchain Actions from Flow's on-chain registries.
+        Supports filtering by category, searching by query, and retrieving specific Actions by ID.
+      operationId: discoverActions
+      tags:
+        - Action Discovery
+      parameters:
+        - name: q
+          in: query
+          description: Search query for Actions
+          schema:
+            type: string
+          example: "swap"
+        - name: category
+          in: query
+          description: Filter Actions by category
+          schema:
+            type: string
+          example: "defi"
+        - name: id
+          in: query
+          description: Get specific Action by ID
+          schema:
+            type: string
+          example: "action_swap_usdc_flow"
+        - name: limit
+          in: query
+          description: Maximum number of Actions to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: refresh
+          in: query
+          description: Force refresh of cached Action data
+          schema:
+            type: boolean
+            default: false
+        - name: similar
+          in: query
+          description: Find Actions similar to the specified Action ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Actions discovered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionsResponse'
+        '404':
+          description: Action not found (when requesting specific Action by ID)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Validate Actions
+      description: |
+        Validate Action metadata, check compatibility between Actions, or validate 
+        workflow chains of Actions.
+      operationId: validateActions
+      tags:
+        - Action Discovery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/ValidateActionRequest'
+                - $ref: '#/components/schemas/ValidateCompatibilityRequest'
+                - $ref: '#/components/schemas/ValidateChainRequest'
+            examples:
+              validateAction:
+                summary: Validate Single Action
+                value:
+                  action:
+                    id: "swap_action"
+                    name: "Token Swap"
+                    description: "Swap tokens on DEX"
+                    category: "defi"
+                    inputs:
+                      - name: "fromToken"
+                        type: "string"
+                        required: true
+                    outputs:
+                      - name: "toToken"
+                        type: "string"
+              validateCompatibility:
+                summary: Check Action Compatibility
+                value:
+                  sourceActionId: "action1"
+                  targetActionId: "action2"
+              validateChain:
+                summary: Validate Workflow Chain
+                value:
+                  actionIds: ["action1", "action2", "action3"]
+      responses:
+        '200':
+          description: Validation completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResponse'
+
+  /agents:
+    get:
+      summary: List Agents
+      description: |
+        List blockchain automation Agents. Can filter by user, status, and include 
+        health information.
+      operationId: listAgents
+      tags:
+        - Agent Management
+      parameters:
+        - name: id
+          in: query
+          description: Get specific Agent by ID
+          schema:
+            type: string
+        - name: userId
+          in: query
+          description: Filter Agents by user ID
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter Agents by status
+          schema:
+            type: string
+            enum: [active, paused, stopped, error]
+        - name: health
+          in: query
+          description: Include Agent health information
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Agents listed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentsResponse'
+        '404':
+          description: Agent not found (when requesting specific Agent by ID)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Create Agent
+      description: |
+        Create a new blockchain automation Agent from a workflow. The Agent will 
+        execute the workflow according to the specified schedule and triggers.
+      operationId: createAgent
+      tags:
+        - Agent Management
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentRequest'
+            examples:
+              fromWorkflow:
+                summary: Create Agent from Workflow
+                value:
+                  workflow:
+                    actions:
+                      - id: "swap1"
+                        actionType: "swap"
+                        name: "Daily DCA"
+                        parameters:
+                          - name: "fromToken"
+                            type: "string"
+                            value: "USDC"
+                            required: true
+                          - name: "toToken"
+                            type: "string"
+                            value: "FLOW"
+                            required: true
+                          - name: "amount"
+                            type: "number"
+                            value: "10"
+                            required: true
+                        nextActions: []
+                        position:
+                          x: 0
+                          y: 0
+                    executionOrder: ["swap1"]
+                    rootActions: ["swap1"]
+                    metadata:
+                      totalActions: 1
+                      totalConnections: 0
+                      createdAt: "2024-01-01T00:00:00Z"
+                  config:
+                    schedule:
+                      type: "recurring"
+                      interval: 86400
+                    eventTriggers: []
+                    retryPolicy:
+                      maxRetries: 3
+                      backoffStrategy: "exponential"
+                      initialDelay: 1000
+                      maxDelay: 10000
+                    notifications: {}
+                    permissions: []
+                  name: "Daily DCA Agent"
+                  description: "Automated daily dollar-cost averaging"
+                  owner: "user123"
+      responses:
+        '200':
+          description: Agent created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateAgentResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      summary: Update Agent
+      description: Update an existing Agent's configuration, schedule, or metadata.
+      operationId: updateAgent
+      tags:
+        - Agent Management
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentRequest'
+      responses:
+        '200':
+          description: Agent updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateAgentResponse'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Delete Agent
+      description: Delete an Agent and stop all its scheduled executions.
+      operationId: deleteAgent
+      tags:
+        - Agent Management
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteAgentRequest'
+      responses:
+        '200':
+          description: Agent deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteAgentResponse'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /agents/control:
+    post:
+      summary: Control Agent
+      description: Control Agent execution (pause, resume, stop).
+      operationId: controlAgent
+      tags:
+        - Agent Management
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentControlRequest'
+      responses:
+        '200':
+          description: Agent control action completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentControlResponse'
+
+  /agents/health:
+    get:
+      summary: Get Agent Health
+      description: Get health status and metrics for Agents.
+      operationId: getAgentHealth
+      tags:
+        - Agent Management
+      parameters:
+        - name: id
+          in: query
+          description: Get health for specific Agent
+          schema:
+            type: string
+        - name: userId
+          in: query
+          description: Get health for user's Agents
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent health retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentHealthResponse'
+
+  /auth/keys:
+    get:
+      summary: List API Keys
+      description: List user's API keys (without exposing the actual key values).
+      operationId: listAPIKeys
+      tags:
+        - Authentication
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          description: User ID to list keys for
+          schema:
+            type: string
+      responses:
+        '200':
+          description: API keys listed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKeysResponse'
+
+    post:
+      summary: Create API Key
+      description: |
+        Create a new API key with specified permissions and rate limits.
+        The raw API key is only returned once - store it securely.
+      operationId: createAPIKey
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAPIKeyRequest'
+      responses:
+        '200':
+          description: API key created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateAPIKeyResponse'
+
+    delete:
+      summary: Revoke API Key
+      description: Revoke an API key, making it invalid for future requests.
+      operationId: revokeAPIKey
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeAPIKeyRequest'
+      responses:
+        '200':
+          description: API key revoked successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokeAPIKeyResponse'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API Key
+      description: |
+        API key authentication. Include your API key in the Authorization header:
+        `Authorization: Bearer al_your_api_key_here`
+
+  schemas:
+    # Request/Response schemas for /compose endpoint
+    ComposeRequest:
+      type: object
+      properties:
+        naturalLanguage:
+          type: string
+          description: Natural language description of the workflow
+          example: "Swap 100 USDC to FLOW and stake in PoolX"
+        workflow:
+          $ref: '#/components/schemas/ParsedWorkflow'
+        options:
+          type: object
+          properties:
+            validate:
+              type: boolean
+              default: true
+              description: Whether to validate the workflow
+            simulate:
+              type: boolean
+              default: false
+              description: Whether to simulate workflow execution
+            generateCadence:
+              type: boolean
+              default: true
+              description: Whether to generate Cadence code
+            executeImmediately:
+              type: boolean
+              default: false
+              description: Whether to execute the workflow immediately
+        metadata:
+          type: object
+          properties:
+            name:
+              type: string
+              description: Workflow name
+            description:
+              type: string
+              description: Workflow description
+            tags:
+              type: array
+              items:
+                type: string
+              description: Workflow tags
+            userId:
+              type: string
+              description: User ID
+      oneOf:
+        - required: [naturalLanguage]
+        - required: [workflow]
+
+    ComposeResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        workflowId:
+          type: string
+          description: Generated workflow ID
+        workflow:
+          $ref: '#/components/schemas/EnhancedWorkflow'
+        cadenceCode:
+          type: string
+          description: Generated Cadence transaction code
+        validationResult:
+          $ref: '#/components/schemas/ValidationResult'
+        simulationResult:
+          $ref: '#/components/schemas/SimulationResult'
+        executionResult:
+          $ref: '#/components/schemas/ExecutionResult'
+        nlpResult:
+          $ref: '#/components/schemas/NLPResult'
+        error:
+          type: string
+        warnings:
+          type: array
+          items:
+            type: string
+
+    # Action-related schemas
+    ActionsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionMetadata'
+        query:
+          type: string
+          description: Search query used (if applicable)
+        category:
+          type: string
+          description: Category filter used (if applicable)
+        total:
+          type: integer
+          description: Total number of actions found
+        registries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionRegistry'
+        lastUpdated:
+          type: string
+          format: date-time
+        executionTime:
+          type: integer
+          description: Discovery execution time in milliseconds
+
+    ActionMetadata:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        version:
+          type: string
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionInput'
+        outputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionOutput'
+        parameters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionParameter'
+        compatibility:
+          $ref: '#/components/schemas/CompatibilityInfo'
+        gasEstimate:
+          type: integer
+        securityLevel:
+          type: string
+          enum: [low, medium, high, critical]
+        author:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ActionInput:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        required:
+          type: boolean
+        description:
+          type: string
+        validation:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationRule'
+
+    ActionOutput:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        description:
+          type: string
+
+    ActionParameter:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        value:
+          type: string
+        required:
+          type: boolean
+
+    ValidationRule:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [range, pattern, custom]
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: object
+        message:
+          type: string
+
+    CompatibilityInfo:
+      type: object
+      properties:
+        requiredCapabilities:
+          type: array
+          items:
+            type: string
+        supportedNetworks:
+          type: array
+          items:
+            type: string
+        minimumFlowVersion:
+          type: string
+        conflictsWith:
+          type: array
+          items:
+            type: string
+
+    ActionRegistry:
+      type: object
+      properties:
+        address:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        actions:
+          type: array
+          items:
+            type: string
+
+    # Validation schemas
+    ValidateActionRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          $ref: '#/components/schemas/ActionMetadata'
+
+    ValidateCompatibilityRequest:
+      type: object
+      required: [sourceActionId, targetActionId]
+      properties:
+        sourceActionId:
+          type: string
+        targetActionId:
+          type: string
+
+    ValidateChainRequest:
+      type: object
+      required: [actionIds]
+      properties:
+        actionIds:
+          type: array
+          items:
+            type: string
+
+    ValidationResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        validationResult:
+          $ref: '#/components/schemas/ValidationResult'
+        compatible:
+          type: boolean
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompatibilityIssue'
+        chainValidation:
+          $ref: '#/components/schemas/ValidationResult'
+
+    ValidationResult:
+      type: object
+      properties:
+        isValid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationError'
+        warnings:
+          type: array
+          items:
+            type: string
+        compatibilityIssues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompatibilityIssue'
+
+    ValidationError:
+      type: object
+      properties:
+        type:
+          type: string
+        message:
+          type: string
+        actionId:
+          type: string
+        field:
+          type: string
+        severity:
+          type: string
+          enum: [error, warning]
+
+    CompatibilityIssue:
+      type: object
+      properties:
+        sourceActionId:
+          type: string
+        targetActionId:
+          type: string
+        issue:
+          type: string
+        suggestion:
+          type: string
+
+    # Agent-related schemas
+    AgentsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        agents:
+          type: array
+          items:
+            type: object
+            properties:
+              agent:
+                $ref: '#/components/schemas/Agent'
+              health:
+                $ref: '#/components/schemas/AgentHealth'
+        total:
+          type: integer
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        workflowId:
+          type: string
+        schedule:
+          $ref: '#/components/schemas/Schedule'
+        triggers:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventTrigger'
+        status:
+          type: string
+          enum: [active, paused, stopped, error]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        owner:
+          type: string
+
+    AgentHealth:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        uptime:
+          type: integer
+          description: Uptime in seconds
+        lastExecution:
+          type: string
+          format: date-time
+        successRate:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        errorCount:
+          type: integer
+        lastError:
+          type: string
+
+    CreateAgentRequest:
+      type: object
+      required: [config, name, owner]
+      properties:
+        workflow:
+          $ref: '#/components/schemas/ParsedWorkflow'
+        workflowId:
+          type: string
+        config:
+          $ref: '#/components/schemas/AgentConfiguration'
+        name:
+          type: string
+        description:
+          type: string
+        owner:
+          type: string
+      oneOf:
+        - required: [workflow]
+        - required: [workflowId]
+
+    CreateAgentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        agentId:
+          type: string
+        agent:
+          $ref: '#/components/schemas/Agent'
+        message:
+          type: string
+
+    UpdateAgentRequest:
+      type: object
+      required: [agentId, updates]
+      properties:
+        agentId:
+          type: string
+        updates:
+          type: object
+          properties:
+            schedule:
+              $ref: '#/components/schemas/Schedule'
+            eventTriggers:
+              type: array
+              items:
+                $ref: '#/components/schemas/EventTrigger'
+            retryPolicy:
+              $ref: '#/components/schemas/RetryPolicy'
+            notifications:
+              $ref: '#/components/schemas/NotificationConfig'
+            permissions:
+              type: array
+              items:
+                $ref: '#/components/schemas/Permission'
+            name:
+              type: string
+            description:
+              type: string
+
+    UpdateAgentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        agent:
+          $ref: '#/components/schemas/Agent'
+        message:
+          type: string
+
+    DeleteAgentRequest:
+      type: object
+      required: [agentId]
+      properties:
+        agentId:
+          type: string
+
+    DeleteAgentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+
+    AgentControlRequest:
+      type: object
+      required: [agentId, action]
+      properties:
+        agentId:
+          type: string
+        action:
+          type: string
+          enum: [pause, resume, stop]
+
+    AgentControlResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        agent:
+          $ref: '#/components/schemas/Agent'
+        message:
+          type: string
+
+    AgentHealthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        agentId:
+          type: string
+        agent:
+          $ref: '#/components/schemas/Agent'
+        health:
+          $ref: '#/components/schemas/AgentHealth'
+        summary:
+          type: object
+          properties:
+            total:
+              type: integer
+            healthy:
+              type: integer
+            degraded:
+              type: integer
+            unhealthy:
+              type: integer
+            healthyPercentage:
+              type: integer
+        agents:
+          type: array
+          items:
+            type: object
+            properties:
+              agentId:
+                type: string
+              agent:
+                $ref: '#/components/schemas/Agent'
+              health:
+                $ref: '#/components/schemas/AgentHealth'
+        timestamp:
+          type: string
+          format: date-time
+
+    AgentConfiguration:
+      type: object
+      required: [schedule, eventTriggers, retryPolicy, notifications, permissions]
+      properties:
+        schedule:
+          $ref: '#/components/schemas/Schedule'
+        eventTriggers:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventTrigger'
+        retryPolicy:
+          $ref: '#/components/schemas/RetryPolicy'
+        notifications:
+          $ref: '#/components/schemas/NotificationConfig'
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+
+    Schedule:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [recurring, event-driven, one-time]
+        interval:
+          type: integer
+          description: Interval in seconds for recurring schedules
+        cronExpression:
+          type: string
+          description: Cron expression for complex schedules
+        eventTriggers:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventTrigger'
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+
+    EventTrigger:
+      type: object
+      required: [type, condition, parameters]
+      properties:
+        type:
+          type: string
+          enum: [price, time, balance, custom]
+        condition:
+          $ref: '#/components/schemas/TriggerCondition'
+        oracleAction:
+          type: string
+          description: Action ID for oracle data
+        parameters:
+          type: object
+          additionalProperties: true
+
+    TriggerCondition:
+      type: object
+      required: [operator, value]
+      properties:
+        operator:
+          type: string
+          enum: [gt, lt, eq, gte, lte]
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+        tolerance:
+          type: number
+
+    RetryPolicy:
+      type: object
+      required: [maxRetries, backoffStrategy, initialDelay, maxDelay]
+      properties:
+        maxRetries:
+          type: integer
+          minimum: 0
+          maximum: 10
+        backoffStrategy:
+          type: string
+          enum: [linear, exponential]
+        initialDelay:
+          type: integer
+          description: Initial delay in milliseconds
+        maxDelay:
+          type: integer
+          description: Maximum delay in milliseconds
+
+    NotificationConfig:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        webhook:
+          type: string
+          format: uri
+        discord:
+          type: string
+        slack:
+          type: string
+
+    Permission:
+      type: object
+      required: [resource, action]
+      properties:
+        resource:
+          type: string
+        action:
+          type: string
+        conditions:
+          type: object
+          additionalProperties: true
+
+    # Workflow schemas
+    ParsedWorkflow:
+      type: object
+      required: [actions, executionOrder, rootActions, metadata]
+      properties:
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParsedAction'
+        executionOrder:
+          type: array
+          items:
+            type: string
+        rootActions:
+          type: array
+          items:
+            type: string
+        metadata:
+          $ref: '#/components/schemas/WorkflowMetadata'
+
+    EnhancedWorkflow:
+      allOf:
+        - $ref: '#/components/schemas/ParsedWorkflow'
+        - type: object
+          properties:
+            nlpSource:
+              type: string
+              description: Original natural language input
+            validationResults:
+              $ref: '#/components/schemas/ValidationResult'
+            simulationResults:
+              $ref: '#/components/schemas/SimulationResult'
+            agentConfig:
+              $ref: '#/components/schemas/AgentConfiguration'
+            securityLevel:
+              type: string
+              enum: [low, medium, high, critical]
+            estimatedGas:
+              type: integer
+            requiredBalance:
+              type: array
+              items:
+                $ref: '#/components/schemas/TokenBalance'
+
+    ParsedAction:
+      type: object
+      required: [id, actionType, name, parameters, nextActions, position]
+      properties:
+        id:
+          type: string
+        actionType:
+          type: string
+        name:
+          type: string
+        parameters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionParameter'
+        nextActions:
+          type: array
+          items:
+            type: string
+        position:
+          type: object
+          properties:
+            x:
+              type: number
+            y:
+              type: number
+
+    WorkflowMetadata:
+      type: object
+      required: [totalActions, totalConnections, createdAt]
+      properties:
+        totalActions:
+          type: integer
+        totalConnections:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        name:
+          type: string
+        savedAt:
+          type: string
+          format: date-time
+        version:
+          type: string
+        author:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    # Simulation and execution schemas
+    SimulationResult:
+      type: object
+      required: [success, gasUsed, balanceChanges, events, errors, warnings, executionTime]
+      properties:
+        success:
+          type: boolean
+        gasUsed:
+          type: integer
+        balanceChanges:
+          type: array
+          items:
+            $ref: '#/components/schemas/BalanceChange'
+        events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulationError'
+        warnings:
+          type: array
+          items:
+            type: string
+        executionTime:
+          type: integer
+          description: Execution time in milliseconds
+
+    ExecutionResult:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        transactionId:
+          type: string
+        status:
+          type: string
+        cadenceCode:
+          type: string
+        executionTime:
+          type: integer
+        gasUsed:
+          type: integer
+        error:
+          type: string
+        details:
+          type: array
+          items:
+            type: string
+
+    BalanceChange:
+      type: object
+      required: [address, token, before, after, change]
+      properties:
+        address:
+          type: string
+        token:
+          type: string
+        before:
+          type: string
+        after:
+          type: string
+        change:
+          type: string
+
+    SimulationError:
+      type: object
+      required: [type, message]
+      properties:
+        type:
+          type: string
+        message:
+          type: string
+        actionId:
+          type: string
+        stackTrace:
+          type: string
+
+    TokenBalance:
+      type: object
+      required: [token, amount, decimals]
+      properties:
+        token:
+          type: string
+        amount:
+          type: string
+        decimals:
+          type: integer
+
+    # NLP schemas
+    NLPResult:
+      type: object
+      required: [confidence, steps, ambiguities, suggestions, processingTime]
+      properties:
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParsedStep'
+        ambiguities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Ambiguity'
+        suggestions:
+          type: array
+          items:
+            type: string
+        processingTime:
+          type: integer
+          description: Processing time in milliseconds
+
+    ParsedStep:
+      type: object
+      required: [actionId, actionName, parameters, confidence]
+      properties:
+        actionId:
+          type: string
+        actionName:
+          type: string
+        parameters:
+          type: object
+          additionalProperties: true
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        position:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+
+    Ambiguity:
+      type: object
+      required: [type, message, suggestions]
+      properties:
+        type:
+          type: string
+          enum: [parameter, action, value]
+        message:
+          type: string
+        suggestions:
+          type: array
+          items:
+            type: string
+        position:
+          type: array
+          items:
+            type: integer
+          minItems: 2
+          maxItems: 2
+
+    # Authentication schemas
+    APIKeysResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        keys:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              createdAt:
+                type: string
+                format: date-time
+              lastUsed:
+                type: string
+                format: date-time
+              isActive:
+                type: boolean
+        total:
+          type: integer
+
+    CreateAPIKeyRequest:
+      type: object
+      required: [name, userId]
+      properties:
+        name:
+          type: string
+          description: Human-readable name for the API key
+        userId:
+          type: string
+          description: User ID who owns the key
+        permissions:
+          type: array
+          items:
+            type: object
+            properties:
+              resource:
+                type: string
+                enum: [compose, actions, agents, nlp, "*"]
+              actions:
+                type: array
+                items:
+                  type: string
+                  enum: [read, write, delete, "*"]
+              conditions:
+                type: object
+                additionalProperties: true
+        tier:
+          type: string
+          enum: [free, pro, enterprise]
+          default: free
+        expiresInDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+          description: Number of days until the key expires
+
+    CreateAPIKeyResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        apiKey:
+          type: object
+          properties:
+            id:
+              type: string
+            key:
+              type: string
+              description: The actual API key - store securely, won't be shown again
+            name:
+              type: string
+            permissions:
+              type: array
+              items:
+                type: object
+            rateLimit:
+              type: object
+              properties:
+                requestsPerMinute:
+                  type: integer
+                requestsPerHour:
+                  type: integer
+                requestsPerDay:
+                  type: integer
+                burstLimit:
+                  type: integer
+            createdAt:
+              type: string
+              format: date-time
+            expiresAt:
+              type: string
+              format: date-time
+        message:
+          type: string
+
+    RevokeAPIKeyRequest:
+      type: object
+      required: [keyId, userId]
+      properties:
+        keyId:
+          type: string
+        userId:
+          type: string
+
+    RevokeAPIKeyResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+
+    # Error response schema
+    ErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: string
+          description: Human-readable error message
+        details:
+          type: string
+          description: Additional technical details about the error
+        code:
+          type: string
+          description: Machine-readable error code
+
+tags:
+  - name: Workflow Composition
+    description: Create and validate blockchain workflows
+  - name: Action Discovery
+    description: Discover and search blockchain Actions
+  - name: Agent Management
+    description: Manage blockchain automation Agents
+  - name: Authentication
+    description: API key management and authentication
