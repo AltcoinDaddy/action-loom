@@ -11,6 +11,7 @@ import { ExecutionReadinessIndicator, ExecutionReadinessData } from "./execution
 import { ErrorBoundary } from "./ui/error-boundary"
 import { WorkflowParser } from "@/lib/workflow-parser"
 import { ParameterValidator } from "@/lib/parameter-validator"
+import { parameterStateDebugger } from "@/lib/parameter-state-debugger"
 
 import type {
   Workflow,
@@ -61,6 +62,45 @@ export function WorkflowBuilder() {
   const parameterValidator = useMemo(() => new ParameterValidator(), [])
 
   const handleWorkflowChange = useCallback((newWorkflow: Workflow) => {
+    // Get current node IDs for comparison
+    const currentNodeIds = workflow.nodes.map(node => node.id)
+    const newNodeIds = newWorkflow.nodes.map(node => node.id)
+    
+    // Find removed nodes
+    const removedNodeIds = currentNodeIds.filter(nodeId => !newNodeIds.includes(nodeId))
+    
+    // Clean up parameter values for removed nodes
+    if (removedNodeIds.length > 0) {
+      setParameterValues(prev => {
+        const newParameterValues = { ...prev }
+        
+        removedNodeIds.forEach(nodeId => {
+          const cleanedParameters = Object.keys(prev[nodeId] || {})
+          if (cleanedParameters.length > 0) {
+            parameterStateDebugger.logParameterCleanup(nodeId, cleanedParameters)
+          }
+          delete newParameterValues[nodeId]
+        })
+        
+        // Take snapshot after cleanup
+        setTimeout(() => {
+          parameterStateDebugger.takeSnapshot(newParameterValues)
+          
+          // Validate state consistency
+          const validation = parameterStateDebugger.validateStateConsistency(
+            newParameterValues, 
+            newNodeIds
+          )
+          
+          if (!validation.isConsistent) {
+            console.warn('Parameter state inconsistency detected after cleanup:', validation.issues)
+          }
+        }, 0)
+        
+        return newParameterValues
+      })
+    }
+
     setWorkflow(newWorkflow)
     if (newWorkflow.nodes.length > 0) {
       const parsed = WorkflowParser.parse(newWorkflow.nodes, newWorkflow.edges)
@@ -76,18 +116,36 @@ export function WorkflowBuilder() {
       setSimulationResult(null)
       setValidationErrors({})
       setWorkflowValidationState({ isValid: true, errors: [], warnings: [] })
+      
+      // Clear all parameter values when workflow is empty
+      setParameterValues({})
+      parameterStateDebugger.takeSnapshot({})
     }
-  }, [])
+  }, [workflow.nodes])
 
   // Listen for actionAdded events to initialize parameter values
   useEffect(() => {
     const handleActionAdded = (event: CustomEvent) => {
       const { nodeId, parameterValues: initialValues } = event.detail
 
-      setParameterValues(prev => ({
-        ...prev,
-        [nodeId]: initialValues
-      }))
+      // Debug logging for parameter initialization
+      Object.entries(initialValues).forEach(([paramName, value]) => {
+        parameterStateDebugger.logParameterChange(nodeId, paramName, undefined, value, 'initialization')
+      })
+
+      setParameterValues(prev => {
+        const newState = {
+          ...prev,
+          [nodeId]: initialValues
+        }
+        
+        // Take snapshot after initialization
+        setTimeout(() => {
+          parameterStateDebugger.takeSnapshot(newState)
+        }, 0)
+        
+        return newState
+      })
     }
 
     window.addEventListener('actionAdded', handleActionAdded as EventListener)
@@ -227,13 +285,26 @@ export function WorkflowBuilder() {
   }, [])
 
   const handleParameterChange = useCallback((nodeId: string, parameterName: string, value: any) => {
-    setParameterValues(prev => ({
-      ...prev,
-      [nodeId]: {
-        ...prev[nodeId],
-        [parameterName]: value
+    // Debug logging for parameter changes
+    const oldValue = parameterValuesRef.current[nodeId]?.[parameterName]
+    parameterStateDebugger.logParameterChange(nodeId, parameterName, oldValue, value, 'user_input')
+
+    setParameterValues(prev => {
+      const newState = {
+        ...prev,
+        [nodeId]: {
+          ...prev[nodeId],
+          [parameterName]: value
+        }
       }
-    }))
+      
+      // Take snapshot after state change for debugging
+      setTimeout(() => {
+        parameterStateDebugger.takeSnapshot(newState)
+      }, 0)
+      
+      return newState
+    })
   }, [])
 
   const handleParameterValidationChange = useCallback((nodeId: string, isValid: boolean, errors: ValidationError[]) => {

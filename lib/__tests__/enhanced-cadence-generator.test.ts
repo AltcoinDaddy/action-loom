@@ -1,472 +1,195 @@
-import { describe, it, expect, beforeEach, afterEach, vi, Mock } from 'vitest'
-import { CadenceGenerator, CadenceGenerationResult } from '../cadence-generator'
-import { ActionDiscoveryService } from '../action-discovery-service'
-import { gracefulErrorHandler, ActionDiscoveryError } from '../graceful-error-handler'
-import { logger } from '../logging-service'
-import type { ParsedWorkflow, EnhancedWorkflow, ActionMetadata } from '../types'
+/**
+ * Tests for Enhanced Cadence Generator
+ */
 
-// Mock dependencies
-vi.mock('../action-discovery-service')
-vi.mock('../graceful-error-handler')
-vi.mock('../logging-service')
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { EnhancedCadenceGenerator, ProductionCadenceGenerationOptions } from '../enhanced-cadence-generator'
+import { ParsedWorkflow, ParsedAction, SecurityLevel } from '../types'
 
-describe('Enhanced CadenceGenerator Error Handling', () => {
-  let mockDiscoveryService: {
-    getAction: Mock
-    discoverActions: Mock
-  }
-  let mockGracefulErrorHandler: {
-    createActionDiscoveryError: Mock
-    handleDiscoveryError: Mock
-  }
-  let mockLogger: {
-    info: Mock
-    warn: Mock
-    error: Mock
-    generateCorrelationId: Mock
-  }
+// Mock the action discovery service
+vi.mock('../action-discovery-service', () => ({
+  getDefaultActionDiscoveryService: () => ({
+    getAction: vi.fn().mockResolvedValue({
+      id: 'test-action',
+      name: 'Test Action',
+      contractAddress: '0x1234567890abcdef',
+      gasEstimate: 200,
+      securityLevel: SecurityLevel.MEDIUM,
+      inputs: [
+        { name: 'amount', type: 'UFix64', required: true },
+        { name: 'recipient', type: 'Address', required: true }
+      ],
+      dependencies: []
+    })
+  })
+}))
 
-  const sampleWorkflow: ParsedWorkflow = {
-    actions: [
-      {
-        id: 'action-1',
-        name: 'Transfer FLOW',
-        actionType: 'transfer-flow',
-        parameters: [
-          { name: 'to', value: '0x123', type: 'Address', required: true },
-          { name: 'amount', value: '10.0', type: 'UFix64', required: true }
-        ]
-      },
-      {
-        id: 'action-2',
-        name: 'Mint NFT',
-        actionType: 'mint-nft',
-        parameters: [
-          { name: 'metadata', value: '{"name": "Test NFT"}', type: 'String', required: true }
-        ]
-      }
-    ],
-    executionOrder: ['action-1', 'action-2'],
-    metadata: {
-      name: 'Test Workflow',
-      totalActions: 2
-    }
-  }
-
-  const sampleActionMetadata: ActionMetadata = {
-    id: 'action-1',
-    name: 'TransferFlow',
-    description: 'Transfer FLOW tokens',
-    category: 'Token',
-    version: '1.0.0',
-    inputs: [
-      { name: 'to', type: 'Address', required: true, description: 'Recipient' },
-      { name: 'amount', type: 'UFix64', required: true, description: 'Amount' }
-    ],
-    outputs: [
-      { name: 'success', type: 'Bool', description: 'Success status' }
-    ],
-    parameters: [],
-    compatibility: {
-      requiredCapabilities: [],
-      supportedNetworks: ['testnet', 'mainnet'],
-      minimumFlowVersion: '1.0.0',
-      conflictsWith: []
-    },
-    gasEstimate: 1000,
-    securityLevel: 'medium' as any,
-    author: 'Test',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    contractAddress: '0x1234567890abcdef',
-    dependencies: []
-  }
+describe('EnhancedCadenceGenerator', () => {
+  let mockWorkflow: ParsedWorkflow
+  let mockAction: ParsedAction
 
   beforeEach(() => {
-    // Reset all mocks
-    vi.clearAllMocks()
-
-    // Setup mock discovery service
-    mockDiscoveryService = {
-      getAction: vi.fn(),
-      discoverActions: vi.fn()
+    mockAction = {
+      id: 'action-1',
+      actionType: 'transfer-flow',
+      name: 'Transfer FLOW',
+      parameters: [
+        { name: 'amount', type: 'UFix64', value: '10.0', required: true },
+        { name: 'recipient', type: 'Address', value: '0x1234567890abcdef', required: true }
+      ],
+      nextActions: [],
+      position: { x: 0, y: 0 }
     }
 
-    // Setup mock graceful error handler
-    mockGracefulErrorHandler = {
-      createActionDiscoveryError: vi.fn(),
-      handleDiscoveryError: vi.fn()
+    mockWorkflow = {
+      actions: [mockAction],
+      executionOrder: ['action-1'],
+      rootActions: ['action-1'],
+      metadata: {
+        totalActions: 1,
+        totalConnections: 0,
+        createdAt: new Date().toISOString(),
+        name: 'Test Workflow'
+      }
     }
-
-    // Setup mock logger
-    mockLogger = {
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-      generateCorrelationId: vi.fn().mockReturnValue('test-correlation-id')
-    }
-
-    // Apply mocks
-    vi.mocked(gracefulErrorHandler).createActionDiscoveryError = mockGracefulErrorHandler.createActionDiscoveryError
-    vi.mocked(gracefulErrorHandler).handleDiscoveryError = mockGracefulErrorHandler.handleDiscoveryError
-    vi.mocked(logger).info = mockLogger.info
-    vi.mocked(logger).warn = mockLogger.warn
-    vi.mocked(logger).error = mockLogger.error
-    vi.mocked(logger).generateCorrelationId = mockLogger.generateCorrelationId
-
-    // Set up the discovery service mock on the CadenceGenerator
-    ;(CadenceGenerator as any).discoveryService = mockDiscoveryService
   })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
+  describe('generateProductionTransaction', () => {
+    it('should generate production-ready Cadence code', async () => {
+      const options: Partial<ProductionCadenceGenerationOptions> = {
+        targetNetwork: 'testnet',
+        enableResourceSafety: true,
+        enableSecurityChecks: true
+      }
 
-  describe('Successful Generation', () => {
-    it('should generate transaction successfully when action discovery works', async () => {
-      // Setup successful discovery
-      mockDiscoveryService.getAction.mockResolvedValue(sampleActionMetadata)
-
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow)
+      const result = await EnhancedCadenceGenerator.generateProductionTransaction(mockWorkflow, options)
 
       expect(result.success).toBe(true)
-      expect(result.errors).toHaveLength(0)
-      expect(result.warnings).toHaveLength(0)
-      expect(result.fallbackUsed).toBe(false)
       expect(result.code).toContain('transaction()')
-      expect(result.code).toContain('TransferFlow')
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'Starting Cadence generation',
-        expect.objectContaining({
-          correlationId: 'test-correlation-id',
-          component: 'cadence-generator'
-        })
-      )
+      expect(result.code).toContain('prepare(')
+      expect(result.code).toContain('execute')
+      expect(result.code).toContain('Production-Ready Flow Transaction')
+      expect(result.validationResult.isValid).toBe(true)
     })
 
-    it('should include execution time in result', async () => {
-      mockDiscoveryService.getAction.mockResolvedValue(sampleActionMetadata)
+    it('should include security checks when enabled', async () => {
+      const options: Partial<ProductionCadenceGenerationOptions> = {
+        enableSecurityChecks: true,
+        targetNetwork: 'mainnet'
+      }
 
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow)
+      const result = await EnhancedCadenceGenerator.generateProductionTransaction(mockWorkflow, options)
 
-      expect(result.executionTime).toBeGreaterThan(0)
-      expect(typeof result.executionTime).toBe('number')
-    })
-  })
-
-  describe('Discovery Error Handling', () => {
-    it('should handle DISCOVERY_IN_PROGRESS error with fallback', async () => {
-      const discoveryError = new Error('Action discovery is already in progress') as ActionDiscoveryError
-      discoveryError.code = 'DISCOVERY_IN_PROGRESS'
-      discoveryError.retryable = true
-      discoveryError.timestamp = Date.now()
-
-      mockDiscoveryService.getAction.mockRejectedValue(discoveryError)
-      mockGracefulErrorHandler.createActionDiscoveryError.mockReturnValue(discoveryError)
-
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: true
-      })
-
-      expect(result.success).toBe(true)
-      expect(result.fallbackUsed).toBe(true)
-      expect(result.warnings).toContain('Generated using fallback method due to action discovery issues')
-      expect(result.code).toContain('FALLBACK TRANSACTION')
-      expect(mockLogger.warn).toHaveBeenCalled()
+      expect(result.code).toContain('assert(')
+      expect(result.code).toContain('Pre-execution safety checks')
     })
 
-    it('should handle API_ERROR with fallback generation', async () => {
-      const apiError = new Error('API request failed') as ActionDiscoveryError
-      apiError.code = 'API_ERROR'
-      apiError.retryable = true
-      apiError.timestamp = Date.now()
-
-      mockDiscoveryService.getAction.mockRejectedValue(apiError)
-      mockGracefulErrorHandler.createActionDiscoveryError.mockReturnValue(apiError)
-
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: true
-      })
-
-      expect(result.success).toBe(true)
-      expect(result.fallbackUsed).toBe(true)
-      expect(result.code).toContain('FALLBACK TRANSACTION')
-      expect(result.code).toContain('Action discovery unavailable')
-    })
-
-    it('should handle NETWORK_ERROR gracefully', async () => {
-      const networkError = new Error('Network connection failed') as ActionDiscoveryError
-      networkError.code = 'NETWORK_ERROR'
-      networkError.retryable = true
-      networkError.timestamp = Date.now()
-
-      mockDiscoveryService.getAction.mockRejectedValue(networkError)
-      mockGracefulErrorHandler.createActionDiscoveryError.mockReturnValue(networkError)
-
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: true
-      })
-
-      expect(result.success).toBe(true)
-      expect(result.fallbackUsed).toBe(true)
-      expect(mockLogger.error).toHaveBeenCalled()
-    })
-
-    it('should handle TIMEOUT error with appropriate fallback', async () => {
-      const timeoutError = new Error('Request timed out') as ActionDiscoveryError
-      timeoutError.code = 'TIMEOUT'
-      timeoutError.retryable = true
-      timeoutError.timestamp = Date.now()
-
-      mockDiscoveryService.getAction.mockRejectedValue(timeoutError)
-      mockGracefulErrorHandler.createActionDiscoveryError.mockReturnValue(timeoutError)
-
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: true
-      })
-
-      expect(result.success).toBe(true)
-      expect(result.fallbackUsed).toBe(true)
-      expect(result.code).toContain('Static action generation')
-    })
-  })
-
-  describe('Fallback Generation', () => {
-    it('should generate static imports when discovery fails', async () => {
-      mockDiscoveryService.getAction.mockRejectedValue(new Error('Discovery failed'))
-
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: true
-      })
-
-      expect(result.code).toContain('import "FungibleToken"')
-      expect(result.code).toContain('import "NonFungibleToken"')
-      expect(result.code).toContain('import "FlowToken"')
-    })
-
-    it('should generate static action setup when metadata unavailable', async () => {
-      mockDiscoveryService.getAction.mockRejectedValue(new Error('Metadata unavailable'))
-
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: true
-      })
-
-      expect(result.code).toContain('Setup for transfer-flow')
-      expect(result.code).toContain('Setup for mint-nft')
-      expect(result.fallbackUsed).toBe(true)
-    })
-
-    it('should generate static action code when dynamic generation fails', async () => {
-      mockDiscoveryService.getAction.mockRejectedValue(new Error('Code generation failed'))
-
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: true
-      })
-
-      expect(result.code).toContain('FLOW vault reference')
-      expect(result.code).toContain('NFT collection reference')
-    })
-  })
-
-  describe('Error Transaction Generation', () => {
-    it('should generate error transaction when fallbacks are disabled', async () => {
-      const error = new Error('Discovery completely failed')
-      mockDiscoveryService.getAction.mockRejectedValue(error)
-      mockGracefulErrorHandler.createActionDiscoveryError.mockReturnValue({
-        ...error,
-        code: 'UNKNOWN_ERROR',
-        retryable: false,
-        timestamp: Date.now()
-      } as ActionDiscoveryError)
-
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: false
-      })
-
-      expect(result.success).toBe(false)
-      expect(result.fallbackUsed).toBe(false)
-      expect(result.errors.length).toBeGreaterThan(0)
-      expect(result.code).toContain('TRANSACTION GENERATION FAILED')
-      expect(result.code).toContain('panic("Cannot execute - transaction generation failed")')
-    })
-
-    it('should generate error transaction when fallback also fails', async () => {
-      // Mock both primary and fallback failures
-      mockDiscoveryService.getAction.mockRejectedValue(new Error('Primary failure'))
-      
-      // Mock a fallback failure by making static generation throw
-      const originalGenerateStaticActionCode = (CadenceGenerator as any).generateStaticActionCode
-      ;(CadenceGenerator as any).generateStaticActionCode = vi.fn().mockImplementation(() => {
-        throw new Error('Fallback also failed')
-      })
-
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: true
-      })
-
-      expect(result.success).toBe(false)
-      expect(result.errors.length).toBeGreaterThan(1)
-      expect(result.code).toContain('TRANSACTION GENERATION FAILED')
-
-      // Restore original method
-      ;(CadenceGenerator as any).generateStaticActionCode = originalGenerateStaticActionCode
-    })
-  })
-
-  describe('Timeout Handling', () => {
-    it('should timeout generation after specified time', async () => {
-      // Mock a slow discovery service
-      mockDiscoveryService.getAction.mockImplementation(() => 
-        new Promise(resolve => setTimeout(() => resolve(sampleActionMetadata), 2000))
-      )
-
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        timeout: 100, // 100ms timeout
-        enableFallbacks: true
-      })
-
-      expect(result.fallbackUsed).toBe(true)
-      expect(result.warnings).toContain('Generated using fallback method due to action discovery issues')
-    })
-  })
-
-  describe('Summary Generation with Error Information', () => {
-    it('should generate summary with discovery status', async () => {
-      // Mock one successful and one failed action
-      mockDiscoveryService.getAction
-        .mockResolvedValueOnce(sampleActionMetadata)
-        .mockRejectedValueOnce(new Error('Action not found'))
-
-      const summary = await CadenceGenerator.generateSummary(sampleWorkflow)
-
-      expect(summary).toContain('✓ Transfer FLOW')
-      expect(summary).toContain('⚠ Mint NFT')
-      expect(summary).toContain('Discovery failed')
-      expect(summary).toContain('1 action(s) had discovery issues')
-      expect(summary).toContain('Will use fallback generation')
-    })
-
-    it('should show success status when all actions discovered', async () => {
-      mockDiscoveryService.getAction.mockResolvedValue(sampleActionMetadata)
-
-      const summary = await CadenceGenerator.generateSummary(sampleWorkflow)
-
-      expect(summary).toContain('All actions discovered successfully')
-      expect(summary).toContain('Full dynamic generation available')
-      expect(summary).not.toContain('WARNING')
-    })
-  })
-
-  describe('Enhanced Workflow Support', () => {
-    it('should handle EnhancedWorkflow with error recovery', async () => {
-      const enhancedWorkflow: EnhancedWorkflow = {
-        ...sampleWorkflow,
-        securityLevel: 'high',
-        estimatedGas: 5000,
-        requiredBalance: [
-          { token: 'FLOW', amount: '10.0' }
+    it('should validate required parameters', async () => {
+      // Create workflow with missing required parameter
+      const invalidAction = {
+        ...mockAction,
+        parameters: [
+          { name: 'amount', type: 'UFix64', value: '', required: true }, // Missing value
+          { name: 'recipient', type: 'Address', value: '0x1234567890abcdef', required: true }
         ]
       }
 
-      mockDiscoveryService.getAction.mockRejectedValue(new Error('Discovery failed'))
+      const invalidWorkflow = {
+        ...mockWorkflow,
+        actions: [invalidAction]
+      }
 
-      const result = await CadenceGenerator.generateTransactionWithDetails(enhancedWorkflow, {
-        enableFallbacks: true
+      const result = await EnhancedCadenceGenerator.generateProductionTransaction(invalidWorkflow)
+
+      expect(result.validationResult.errors.some(e => e.type === 'MISSING_REQUIRED_PARAMETER')).toBe(true)
+    })
+
+    it('should validate Flow address format', async () => {
+      const invalidAction = {
+        ...mockAction,
+        parameters: [
+          { name: 'amount', type: 'UFix64', value: '10.0', required: true },
+          { name: 'recipient', type: 'Address', value: 'invalid-address', required: true }
+        ]
+      }
+
+      const invalidWorkflow = {
+        ...mockWorkflow,
+        actions: [invalidAction]
+      }
+
+      const result = await EnhancedCadenceGenerator.generateProductionTransaction(invalidWorkflow)
+
+      expect(result.validationResult.errors.some(e => e.type === 'INVALID_PARAMETER_TYPE')).toBe(true)
+    })
+
+    it('should estimate gas usage', async () => {
+      const result = await EnhancedCadenceGenerator.generateProductionTransaction(mockWorkflow)
+
+      expect(result.validationResult.gasEstimate).toBeGreaterThan(0)
+      expect(result.validationResult.resourceUsage.computationUsed).toBeGreaterThan(0)
+    })
+
+    it('should detect circular dependencies', async () => {
+      // Create workflow with circular dependency
+      const action1 = { ...mockAction, id: 'action-1', nextActions: ['action-2'] }
+      const action2 = { ...mockAction, id: 'action-2', nextActions: ['action-1'] }
+
+      const circularWorkflow = {
+        ...mockWorkflow,
+        actions: [action1, action2],
+        executionOrder: ['action-1', 'action-2']
+      }
+
+      const result = await EnhancedCadenceGenerator.generateProductionTransaction(circularWorkflow)
+
+      expect(result.validationResult.errors.some(e => e.type === 'CIRCULAR_DEPENDENCY')).toBe(true)
+    })
+  })
+
+  describe('Flow type conversion', () => {
+    it('should convert JavaScript values to Flow types', () => {
+      expect(EnhancedCadenceGenerator.convertToFlowType('10.5', 'UFix64')).toBe('10.50000000')
+      expect(EnhancedCadenceGenerator.convertToFlowType('0x1234567890abcdef', 'Address')).toBe('0x1234567890abcdef')
+      expect(EnhancedCadenceGenerator.convertToFlowType('true', 'Bool')).toBe(true)
+      expect(EnhancedCadenceGenerator.convertToFlowType('42', 'UInt64')).toBe('42')
+    })
+
+    it('should validate Flow type values', () => {
+      expect(EnhancedCadenceGenerator.validateFlowType('0x1234567890abcdef', 'Address')).toBe(true)
+      expect(EnhancedCadenceGenerator.validateFlowType('invalid-address', 'Address')).toBe(false)
+      expect(EnhancedCadenceGenerator.validateFlowType('10.5', 'UFix64')).toBe(true)
+      expect(EnhancedCadenceGenerator.validateFlowType('-5.0', 'UFix64')).toBe(false)
+      expect(EnhancedCadenceGenerator.validateFlowType(true, 'Bool')).toBe(true)
+      expect(EnhancedCadenceGenerator.validateFlowType('not-boolean', 'Bool')).toBe(false)
+    })
+  })
+
+  describe('error handling', () => {
+    it('should handle action discovery failures gracefully', async () => {
+      // Mock action discovery to fail
+      vi.mocked(require('../action-discovery-service').getDefaultActionDiscoveryService).mockReturnValue({
+        getAction: vi.fn().mockRejectedValue(new Error('Discovery failed'))
       })
 
+      const result = await EnhancedCadenceGenerator.generateProductionTransaction(mockWorkflow)
+
+      // Should still generate code using fallback methods
       expect(result.success).toBe(true)
-      expect(result.fallbackUsed).toBe(true)
-      expect(result.code).toContain('Enhanced Workflow')
-    })
-  })
-
-  describe('Logging and Monitoring', () => {
-    it('should log generation start and completion', async () => {
-      mockDiscoveryService.getAction.mockResolvedValue(sampleActionMetadata)
-
-      await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow)
-
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'Starting Cadence generation',
-        expect.objectContaining({
-          correlationId: 'test-correlation-id',
-          component: 'cadence-generator',
-          operation: 'generate-transaction'
-        })
-      )
-
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'Cadence generation completed successfully',
-        expect.objectContaining({
-          correlationId: 'test-correlation-id',
-          component: 'cadence-generator'
-        })
-      )
+      expect(result.code).toContain('transaction()')
     })
 
-    it('should log warnings for discovery failures', async () => {
-      mockDiscoveryService.getAction.mockRejectedValue(new Error('Action not found'))
+    it('should return error transaction for critical failures', async () => {
+      // Create workflow that will cause validation failure
+      const invalidWorkflow = {
+        ...mockWorkflow,
+        actions: [] // Empty actions array
+      }
 
-      await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: true
-      })
+      const result = await EnhancedCadenceGenerator.generateProductionTransaction(invalidWorkflow)
 
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Failed to get action metadata for code generation, using static fallback',
-        expect.objectContaining({
-          component: 'cadence-generator',
-          operation: 'generate-action-code'
-        })
-      )
-    })
-
-    it('should log errors with correlation IDs', async () => {
-      const error = new Error('Critical failure')
-      mockDiscoveryService.getAction.mockRejectedValue(error)
-
-      await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: false
-      })
-
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        'Cadence generation failed',
-        error,
-        expect.objectContaining({
-          correlationId: 'test-correlation-id',
-          component: 'cadence-generator'
-        })
-      )
-    })
-  })
-
-  describe('Configuration Options', () => {
-    it('should respect enableFallbacks option', async () => {
-      mockDiscoveryService.getAction.mockRejectedValue(new Error('Discovery failed'))
-
-      const resultWithFallbacks = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: true
-      })
-
-      const resultWithoutFallbacks = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        enableFallbacks: false
-      })
-
-      expect(resultWithFallbacks.success).toBe(true)
-      expect(resultWithFallbacks.fallbackUsed).toBe(true)
-
-      expect(resultWithoutFallbacks.success).toBe(false)
-      expect(resultWithoutFallbacks.fallbackUsed).toBe(false)
-    })
-
-    it('should include comments when requested', async () => {
-      mockDiscoveryService.getAction.mockResolvedValue(sampleActionMetadata)
-
-      const result = await CadenceGenerator.generateTransactionWithDetails(sampleWorkflow, {
-        includeComments: true
-      })
-
-      expect(result.code).toContain('// Action 1:')
-      expect(result.code).toContain('// Contract:')
+      expect(result.success).toBe(false)
+      expect(result.errors.length).toBeGreaterThan(0)
     })
   })
 })

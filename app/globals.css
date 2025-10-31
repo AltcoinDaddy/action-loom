@@ -238,4 +238,119 @@
   .processing-pulse {
     animation: pulse-processing 1.5s ease-in-out infinite;
   }
+
+  /* Enhanced input field visual feedback utilities */
+  .input-focus-enhanced {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .input-focus-enhanced:focus-within {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 0 0 0 3px hsl(var(--ring) / 0.2);
+  }
+
+  .input-error-shake {
+    animation: shake 0.5s ease-in-out;
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
+  }
+
+  .input-success-glow {
+    box-shadow: 0 0 0 2px hsl(142 76% 36% / 0.2), 0 2px 8px hsl(142 76% 36% / 0.1);
+  }
+
+  .input-warning-glow {
+    box-shadow: 0 0 0 2px hsl(45 93% 47% / 0.2), 0 2px 8px hsl(45 93% 47% / 0.1);
+  }
+
+  .input-error-glow {
+    box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.2), 0 2px 8px hsl(var(--destructive) / 0.1);
+  }
+
+  /* Required field indicator pulse */
+  @keyframes required-pulse {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.7;
+      transform: scale(1.1);
+    }
+  }
+
+  .required-indicator {
+    animation: required-pulse 2s ease-in-out infinite;
+  }
+
+  /* Validation status indicator animations */
+  @keyframes validation-success {
+    0% {
+      opacity: 0;
+      transform: scale(0.8);
+    }
+    50% {
+      transform: scale(1.1);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes validation-error {
+    0% {
+      opacity: 0;
+      transform: scale(0.8) rotate(-10deg);
+    }
+    50% {
+      transform: scale(1.1) rotate(5deg);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1) rotate(0deg);
+    }
+  }
+
+  .validation-success-enter {
+    animation: validation-success 0.3s ease-out;
+  }
+
+  .validation-error-enter {
+    animation: validation-error 0.3s ease-out;
+  }
+
+  /* Enhanced hover states for interactive elements */
+  .interactive-hover {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .interactive-hover:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  .interactive-hover:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Focus ring enhancements for better accessibility */
+  .focus-ring-enhanced {
+    outline: none;
+    transition: box-shadow 0.2s ease;
+  }
+
+  .focus-ring-enhanced:focus-visible {
+    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5), 0 0 0 6px hsl(var(--ring) / 0.2);
+  }
+
+  /* Input field state transitions */
+  .input-state-transition {
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  }
 }

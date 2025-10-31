@@ -203,6 +203,8 @@ export interface ActionParameter {
   type: string
   value: string
   required: boolean
+  description?: string
+  options?: string[]  // For dropdown/select parameters
 }
 
 // Configuration status types
@@ -566,4 +568,127 @@ export interface TextPreprocessingResult {
     characterCount: number
     language?: string
   }
+}
+
+// Flow Client Library (FCL) Integration Types
+export interface FlowNetworkConfig {
+  name: string
+  chainId: string
+  accessNode: string
+  discoveryWallet: string
+  walletDiscovery: string
+  fclConfig: FCLConfig
+}
+
+export interface FCLConfig {
+  'accessNode.api': string
+  'discovery.wallet': string
+  'discovery.authn': string
+  'app.detail.title': string
+  'app.detail.icon': string
+}
+
+export interface FlowAccount {
+  address: string
+  balance: string
+  code: string
+  keys: AccountKey[]
+  contracts: Record<string, Contract>
+}
+
+export interface AccountKey {
+  index: number
+  publicKey: string
+  signAlgo: number
+  hashAlgo: number
+  weight: number
+  sequenceNumber: number
+  revoked: boolean
+}
+
+export interface Contract {
+  name: string
+  code: string
+  address: string
+}
+
+export interface FlowUser {
+  addr: string | null
+  cid: string | null
+  expiresAt: number | null
+  f_type: string
+  f_vsn: string
+  loggedIn: boolean
+  services: FlowService[]
+}
+
+export interface FlowService {
+  f_type: string
+  f_vsn: string
+  type: string
+  method: string
+  endpoint: string
+  uid: string
+  id: string
+  identity: {
+    address: string
+    keyId: number
+  }
+  provider: {
+    address: string
+    name: string
+    icon: string
+    description: string
+  }
+}
+
+export enum WalletType {
+  BLOCTO = 'blocto',
+  LILICO = 'lilico',
+  DAPPER = 'dapper',
+  FLOW_WALLET = 'flow-wallet'
+}
+
+export interface WalletConnection {
+  address: string
+  walletType: WalletType
+  isAuthenticated: boolean
+  capabilities: string[]
+}
+
+export interface FlowIntegrationContextType {
+  // Network management
+  currentNetwork: FlowNetworkConfig
+  switchNetwork: (network: FlowNetworkConfig) => Promise<void>
+  
+  // Connection state
+  isConnected: boolean
+  currentUser: FlowUser | null
+  
+  // Wallet management
+  connect: (walletType?: WalletType) => Promise<WalletConnection>
+  disconnect: () => Promise<void>
+  
+  // Account data
+  getAccount: () => Promise<FlowAccount>
+  getBalance: (tokenType?: string) => Promise<TokenBalance>
+  getMultipleBalances: (tokenTypes: string[]) => Promise<TokenBalance[]>
+  
+  // Real-time data
+  subscribeToAccountChanges: (callback: (account: FlowAccount) => void) => () => void
+  subscribeToBalanceChanges: (tokenType: string, callback: (balance: TokenBalance) => void) => () => void
+  
+  // Network configurations
+  networks: {
+    testnet: FlowNetworkConfig
+    mainnet: FlowNetworkConfig
+  }
+  
+  // Loading states
+  isConnecting: boolean
+  isLoading: boolean
+  
+  // Error handling
+  error: string | null
+  clearError: () => void
 }

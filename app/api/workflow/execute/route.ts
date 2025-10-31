@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server"
-import type { ParsedWorkflow, ActionMetadata } from "@/lib/types"
+import type { ParsedWorkflow, ActionMetadata, FlowNetworkConfig } from "@/lib/types"
 import { CadenceGenerator } from "@/lib/cadence-generator"
 import { WorkflowParser } from "@/lib/workflow-parser"
 import { ExecutionValidator } from "@/lib/execution-validator"
+import { FlowTransactionManager, TransactionBuildOptions } from "@/lib/transaction-manager"
 import {
   withErrorHandling,
   createSuccessResponse,
@@ -117,28 +118,84 @@ async function handlePOST(request: Request): Promise<NextResponse> {
     )
   }
 
-  // Generate Cadence code
-  let cadenceCode: string
-  try {
-    cadenceCode = CadenceGenerator.generateTransaction(workflow)
-  } catch (error) {
-    throwValidationError('Cadence code generation failed', error instanceof Error ? error.message : 'Unknown code generation error')
+  // Get network configuration from environment
+  const network = (process.env.NEXT_PUBLIC_FLOW_NETWORK as 'testnet' | 'mainnet') || 'testnet'
+  const networkConfig: FlowNetworkConfig = {
+    name: network,
+    accessNode: network === 'mainnet' 
+      ? process.env.NEXT_PUBLIC_FLOW_MAINNET_ACCESS_NODE || 'https://rest-mainnet.onflow.org'
+      : process.env.NEXT_PUBLIC_FLOW_TESTNET_ACCESS_NODE || 'https://rest-testnet.onflow.org',
+    walletDiscovery: network === 'mainnet'
+      ? process.env.NEXT_PUBLIC_FLOW_MAINNET_WALLET_DISCOVERY || 'https://fcl-discovery.onflow.org/authn'
+      : process.env.NEXT_PUBLIC_FLOW_TESTNET_WALLET_DISCOVERY || 'https://fcl-discovery.onflow.org/testnet/authn'
   }
 
-  // Simulate execution (in production, this would interact with Flow blockchain)
+  // Initialize transaction manager
+  const transactionManager = new FlowTransactionManager(networkConfig)
+
+  // Check if we should use simulation mode (for development/testing)
+  const useSimulation = process.env.NODE_ENV === 'development' && process.env.FORCE_REAL_EXECUTION !== 'true'
+
   let executionResult: any
   try {
-    executionResult = await simulateExecution(workflow, cadenceCode)
+    if (useSimulation) {
+      // Use simulation for development
+      console.log('Using simulation mode for development')
+      
+      // Generate Cadence code for preview
+      const cadenceCode = CadenceGenerator.generateTransaction(workflow)
+      
+      // Build transaction for simulation
+      const buildOptions: TransactionBuildOptions = {
+        network,
+        enableOptimizations: true
+      }
+      
+      const transaction = await transactionManager.buildTransaction(workflow, buildOptions)
+      const simulationResult = await transactionManager.simulateTransaction(transaction)
+      
+      executionResult = {
+        transactionId: simulationResult.transactionId,
+        status: simulationResult.status,
+        cadenceCode,
+        executionTime: simulationResult.executionTime,
+        gasUsed: simulationResult.gasUsed,
+        blockHeight: simulationResult.blockHeight,
+        events: simulationResult.events,
+        isSimulation: true
+      }
+    } else {
+      // Use real blockchain execution
+      console.log('Using real Flow blockchain execution')
+      
+      const buildOptions: TransactionBuildOptions = {
+        network,
+        enableOptimizations: true,
+        gasLimit: validationResult.estimatedGasCost ? parseInt(validationResult.estimatedGasCost) : undefined
+      }
+      
+      // Build and execute transaction
+      const transaction = await transactionManager.buildTransaction(workflow, buildOptions)
+      const transactionResult = await transactionManager.executeTransaction(transaction)
+      
+      executionResult = {
+        transactionId: transactionResult.transactionId,
+        status: transactionResult.status,
+        cadenceCode: transaction.cadenceCode,
+        executionTime: transactionResult.executionTime,
+        gasUsed: transactionResult.gasUsed,
+        blockHeight: transactionResult.blockHeight,
+        events: transactionResult.events,
+        error: transactionResult.error,
+        isSimulation: false
+      }
+    }
   } catch (error) {
-    throwValidationError('Workflow execution simulation failed', error instanceof Error ? error.message : 'Unknown execution error')
+    throwValidationError('Workflow execution failed', error instanceof Error ? error.message : 'Unknown execution error')
   }
 
   return createSuccessResponse(null, {
-    transactionId: executionResult.transactionId,
-    status: executionResult.status,
-    cadenceCode,
-    executionTime: executionResult.executionTime,
-    gasUsed: executionResult.gasUsed,
+    ...executionResult,
     validationResult: {
       executionReadiness: validationResult.executionReadiness,
       estimatedGasCost: validationResult.estimatedGasCost,
@@ -195,25 +252,4 @@ function getDefaultActionMetadata(workflow: ParsedWorkflow): Record<string, Acti
   return metadata
 }
 
-/**
- * Simulate workflow execution on Flow blockchain
- * In production, this would use @onflow/fcl to interact with Flow
- */
-async function simulateExecution(workflow: ParsedWorkflow, cadenceCode: string) {
-  // Simulate network delay
-  await new Promise((resolve) => setTimeout(resolve, 1500))
 
-  // Generate mock transaction ID
-  const transactionId = `0x${Math.random().toString(16).substring(2, 18)}`
-
-  // Calculate mock gas usage based on workflow complexity
-  const gasUsed = workflow.metadata.totalActions * 100 + workflow.metadata.totalConnections * 50
-
-  return {
-    transactionId,
-    status: "sealed" as const,
-    executionTime: 1500,
-    gasUsed,
-    blockHeight: Math.floor(Math.random() * 1000000) + 50000000,
-  }
-}

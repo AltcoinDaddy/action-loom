@@ -143,7 +143,8 @@ export class ParameterValidator {
   validateAllParameters(
     action: ActionMetadata,
     parameterValues: Record<string, any>,
-    context: ValidationContext
+    context: ValidationContext,
+    options: { skipUserInteractionCheck?: boolean } = {}
   ): ActionValidationResult {
     const missingParameters: string[] = []
     const invalidParameters: Record<string, ParameterValidationResult> = {}
@@ -172,8 +173,8 @@ export class ParameterValidator {
 
       // Only report missing required parameters if the user has started configuring parameters
       // This prevents showing "missing required parameter" errors immediately when an action is added
-      if (parameter.validation?.required && (value === undefined || value === null || value === '')) {
-        if (hasAnyParameterValues || this.hasUserInteractedWithAction(parameterValues)) {
+      if (parameter.validation?.required && !this.hasParameterValue(value)) {
+        if (options.skipUserInteractionCheck || hasAnyParameterValues || this.hasUserInteractedWithAction(parameterValues)) {
           missingParameters.push(parameter.name)
         }
       }
@@ -202,22 +203,51 @@ export class ParameterValidator {
   }
 
   /**
+   * Checks if a parameter has a meaningful value (not empty/null/undefined)
+   */
+  private hasParameterValue(value: any): boolean {
+    // Handle null and undefined
+    if (value === null || value === undefined) {
+      return false
+    }
+    
+    // Handle strings - check for non-empty after trimming
+    if (typeof value === 'string') {
+      return value.trim() !== ''
+    }
+    
+    // Handle numbers - check for valid numbers (including zero)
+    if (typeof value === 'number') {
+      return !isNaN(value) && isFinite(value)
+    }
+    
+    // Handle booleans - always considered as having a value
+    if (typeof value === 'boolean') {
+      return true
+    }
+    
+    // Handle arrays - check for non-empty arrays
+    if (Array.isArray(value)) {
+      return value.length > 0
+    }
+    
+    // Handle objects - check for non-empty objects
+    if (typeof value === 'object') {
+      return Object.keys(value).length > 0
+    }
+    
+    // For any other type, consider it as having a value if it's not falsy
+    return Boolean(value)
+  }
+
+  /**
    * Checks if the user has interacted with the action parameters
    * This helps determine whether to show "missing required parameter" errors
    */
   private hasUserInteractedWithAction(parameterValues: Record<string, any>): boolean {
-    // If any parameter has a non-empty value, consider it as user interaction
+    // If any parameter has a meaningful value, consider it as user interaction
     return Object.values(parameterValues).some(value => {
-      if (typeof value === 'string') {
-        return value.trim() !== ''
-      }
-      if (typeof value === 'boolean') {
-        return true // Boolean values are always considered as set
-      }
-      if (typeof value === 'number') {
-        return !isNaN(value)
-      }
-      return value !== null && value !== undefined
+      return this.hasParameterValue(value)
     })
   }
 
@@ -323,76 +353,402 @@ export class ParameterValidator {
 
   /**
    * Validates parameter constraints
+   * Enhanced with proper validation for each parameter type
    */
   private validateConstraints(parameter: EnhancedActionParameter, value: any): ValidationResult {
     const errors: ValidationError[] = []
     const warnings: string[] = []
+    const suggestions: string[] = []
     const constraints = parameter.validation?.constraints
 
     if (!constraints) {
-      return { isValid: true, errors: [], warnings: [] }
+      return { isValid: true, errors: [], warnings: [], suggestions: [] }
     }
+
+    const parameterType = parameter.validation?.type
+
+    // Type-specific constraint validation
+    switch (parameterType) {
+      case ParameterType.ADDRESS:
+        this.validateAddressConstraints(parameter, value, constraints, errors, warnings, suggestions)
+        break
+      
+      case ParameterType.UFIX64:
+        this.validateUFix64Constraints(parameter, value, constraints, errors, warnings, suggestions)
+        break
+      
+      case ParameterType.STRING:
+        this.validateStringConstraints(parameter, value, constraints, errors, warnings, suggestions)
+        break
+      
+      case ParameterType.UINT64:
+        this.validateUInt64Constraints(parameter, value, constraints, errors, warnings, suggestions)
+        break
+      
+      case ParameterType.INT:
+        this.validateIntConstraints(parameter, value, constraints, errors, warnings, suggestions)
+        break
+      
+      case ParameterType.ARRAY:
+        this.validateArrayConstraints(parameter, value, constraints, errors, warnings, suggestions)
+        break
+      
+      case ParameterType.DICTIONARY:
+        this.validateDictionaryConstraints(parameter, value, constraints, errors, warnings, suggestions)
+        break
+      
+      default:
+        // Fallback to generic constraint validation
+        this.validateGenericConstraints(parameter, value, constraints, errors, warnings, suggestions)
+        break
+    }
+
+    return { isValid: errors.length === 0, errors, warnings, suggestions }
+  }
+
+  /**
+   * Validate Address-specific constraints
+   */
+  private validateAddressConstraints(
+    parameter: EnhancedActionParameter,
+    value: any,
+    constraints: ParameterConstraints,
+    errors: ValidationError[],
+    warnings: string[],
+    suggestions: string[]
+  ): void {
+    if (typeof value !== 'string') return
+
+    const trimmed = value.trim()
+
+    // Pattern validation (Flow address format)
+    if (constraints.pattern) {
+      if (!constraints.pattern.test(trimmed)) {
+        errors.push({
+          type: ValidationErrorType.PATTERN_MISMATCH,
+          message: `${parameter.name} must be a valid Flow address (0x followed by 16 hex characters)`,
+          field: parameter.name,
+          severity: 'error'
+        })
+        suggestions.push('Flow addresses must start with "0x" and contain exactly 16 hexadecimal characters')
+      }
+    }
+
+    // Length validation
+    if (constraints.minLength !== undefined && trimmed.length < constraints.minLength) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must be exactly 18 characters long (0x + 16 hex characters)`,
+        field: parameter.name,
+        severity: 'error'
+      })
+    }
+
+    if (constraints.maxLength !== undefined && trimmed.length > constraints.maxLength) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must be exactly 18 characters long (0x + 16 hex characters)`,
+        field: parameter.name,
+        severity: 'error'
+      })
+    }
+
+    // Provide helpful suggestions for common address format mistakes
+    if (trimmed.length > 0 && !constraints.pattern?.test(trimmed)) {
+      if (!trimmed.startsWith('0x')) {
+        suggestions.push('Address must start with "0x"')
+      } else if (trimmed.length !== 18) {
+        suggestions.push(`Address must be exactly 18 characters (currently ${trimmed.length})`)
+      } else if (!/^0x[a-fA-F0-9]+$/.test(trimmed)) {
+        suggestions.push('Address must contain only hexadecimal characters (0-9, a-f, A-F)')
+      }
+    }
+  }
+
+  /**
+   * Validate UFix64-specific constraints
+   */
+  private validateUFix64Constraints(
+    parameter: EnhancedActionParameter,
+    value: any,
+    constraints: ParameterConstraints,
+    errors: ValidationError[],
+    warnings: string[],
+    suggestions: string[]
+  ): void {
+    const numValue = typeof value === 'string' ? parseFloat(value.trim()) : value
+    
+    if (isNaN(numValue) || !isFinite(numValue)) return
 
     // Range validation
-    if (constraints.min !== undefined || constraints.max !== undefined) {
-      const numValue = parseFloat(value)
-      if (!isNaN(numValue)) {
-        if (constraints.min !== undefined && numValue < constraints.min) {
-          errors.push({
-            type: ValidationErrorType.OUT_OF_RANGE,
-            message: ERROR_MESSAGES[ValidationErrorType.OUT_OF_RANGE](
-              parameter.name,
-              constraints.min,
-              constraints.max || Infinity
-            ),
-            field: parameter.name,
-            severity: 'error'
-          })
-        }
-        if (constraints.max !== undefined && numValue > constraints.max) {
-          errors.push({
-            type: ValidationErrorType.OUT_OF_RANGE,
-            message: ERROR_MESSAGES[ValidationErrorType.OUT_OF_RANGE](
-              parameter.name,
-              constraints.min || -Infinity,
-              constraints.max
-            ),
-            field: parameter.name,
-            severity: 'error'
-          })
-        }
+    if (constraints.min !== undefined && numValue < constraints.min) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must be at least ${constraints.min}`,
+        field: parameter.name,
+        severity: 'error'
+      })
+      suggestions.push(`Minimum value: ${constraints.min}`)
+    }
+
+    if (constraints.max !== undefined && numValue > constraints.max) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must be no more than ${constraints.max}`,
+        field: parameter.name,
+        severity: 'error'
+      })
+      suggestions.push(`Maximum value: ${constraints.max}`)
+    }
+
+    // Decimal places validation
+    if (constraints.decimals !== undefined) {
+      const decimalPlaces = this.getDecimalPlaces(value)
+      if (decimalPlaces > constraints.decimals) {
+        warnings.push(`${parameter.name} has more than ${constraints.decimals} decimal places`)
+        suggestions.push(`UFix64 supports up to ${constraints.decimals} decimal places`)
       }
     }
 
-    // String length validation
-    if (typeof value === 'string') {
-      if (constraints.minLength !== undefined && value.length < constraints.minLength) {
-        errors.push({
-          type: ValidationErrorType.OUT_OF_RANGE,
-          message: `${parameter.name} must be at least ${constraints.minLength} characters long`,
-          field: parameter.name,
-          severity: 'error'
-        })
-      }
-      if (constraints.maxLength !== undefined && value.length > constraints.maxLength) {
-        errors.push({
-          type: ValidationErrorType.OUT_OF_RANGE,
-          message: `${parameter.name} must be no more than ${constraints.maxLength} characters long`,
-          field: parameter.name,
-          severity: 'error'
-        })
-      }
+    // Provide helpful suggestions for UFix64 values
+    if (numValue === 0) {
+      warnings.push(`${parameter.name} is zero - ensure this is intended`)
+    }
+    
+    if (numValue < 0.00000001 && numValue > 0) {
+      warnings.push(`${parameter.name} is very small - minimum meaningful UFix64 value is 0.00000001`)
+    }
+  }
+
+  /**
+   * Validate String-specific constraints
+   */
+  private validateStringConstraints(
+    parameter: EnhancedActionParameter,
+    value: any,
+    constraints: ParameterConstraints,
+    errors: ValidationError[],
+    warnings: string[],
+    suggestions: string[]
+  ): void {
+    if (typeof value !== 'string') return
+
+    // Length validation
+    if (constraints.minLength !== undefined && value.length < constraints.minLength) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must be at least ${constraints.minLength} characters long`,
+        field: parameter.name,
+        severity: 'error'
+      })
+    }
+
+    if (constraints.maxLength !== undefined && value.length > constraints.maxLength) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must be no more than ${constraints.maxLength} characters long`,
+        field: parameter.name,
+        severity: 'error'
+      })
     }
 
     // Pattern validation
+    if (constraints.pattern && !constraints.pattern.test(value)) {
+      errors.push({
+        type: ValidationErrorType.PATTERN_MISMATCH,
+        message: `${parameter.name} does not match the required format`,
+        field: parameter.name,
+        severity: 'error'
+      })
+    }
+
+    // Enum validation with enhanced error handling
+    if (constraints.enum && constraints.enum.length > 0) {
+      if (!constraints.enum.includes(value)) {
+        errors.push({
+          type: ValidationErrorType.ENUM_VIOLATION,
+          message: `${parameter.name} must be one of: ${constraints.enum.join(', ')}`,
+          field: parameter.name,
+          severity: 'error'
+        })
+        
+        // Provide suggestions for similar values
+        const similarOptions = this.findSimilarEnumOptions(value, constraints.enum)
+        if (similarOptions.length > 0) {
+          suggestions.push(`Did you mean: ${similarOptions.join(', ')}?`)
+        } else {
+          suggestions.push(`Available options: ${constraints.enum.join(', ')}`)
+        }
+      }
+    }
+  }
+
+  /**
+   * Validate UInt64-specific constraints
+   */
+  private validateUInt64Constraints(
+    parameter: EnhancedActionParameter,
+    value: any,
+    constraints: ParameterConstraints,
+    errors: ValidationError[],
+    warnings: string[],
+    suggestions: string[]
+  ): void {
+    const numValue = typeof value === 'string' ? parseInt(value.trim(), 10) : value
+    
+    if (isNaN(numValue) || !isFinite(numValue)) return
+
+    // Range validation
+    if (constraints.min !== undefined && numValue < constraints.min) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must be at least ${constraints.min}`,
+        field: parameter.name,
+        severity: 'error'
+      })
+    }
+
+    if (constraints.max !== undefined && numValue > constraints.max) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must be no more than ${constraints.max}`,
+        field: parameter.name,
+        severity: 'error'
+      })
+    }
+
+    // UInt64 must be non-negative
+    if (numValue < 0) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must be a non-negative integer`,
+        field: parameter.name,
+        severity: 'error'
+      })
+      suggestions.push('UInt64 values must be 0 or positive integers')
+    }
+  }
+
+  /**
+   * Validate Int-specific constraints
+   */
+  private validateIntConstraints(
+    parameter: EnhancedActionParameter,
+    value: any,
+    constraints: ParameterConstraints,
+    errors: ValidationError[],
+    warnings: string[],
+    suggestions: string[]
+  ): void {
+    const numValue = typeof value === 'string' ? parseInt(value.trim(), 10) : value
+    
+    if (isNaN(numValue) || !isFinite(numValue)) return
+
+    // Range validation
+    if (constraints.min !== undefined && numValue < constraints.min) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must be at least ${constraints.min}`,
+        field: parameter.name,
+        severity: 'error'
+      })
+    }
+
+    if (constraints.max !== undefined && numValue > constraints.max) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must be no more than ${constraints.max}`,
+        field: parameter.name,
+        severity: 'error'
+      })
+    }
+  }
+
+  /**
+   * Validate Array-specific constraints
+   */
+  private validateArrayConstraints(
+    parameter: EnhancedActionParameter,
+    value: any,
+    constraints: ParameterConstraints,
+    errors: ValidationError[],
+    warnings: string[],
+    suggestions: string[]
+  ): void {
+    if (!Array.isArray(value)) return
+
+    // Length validation
+    if (constraints.minLength !== undefined && value.length < constraints.minLength) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must contain at least ${constraints.minLength} items`,
+        field: parameter.name,
+        severity: 'error'
+      })
+    }
+
+    if (constraints.maxLength !== undefined && value.length > constraints.maxLength) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must contain no more than ${constraints.maxLength} items`,
+        field: parameter.name,
+        severity: 'error'
+      })
+    }
+  }
+
+  /**
+   * Validate Dictionary-specific constraints
+   */
+  private validateDictionaryConstraints(
+    parameter: EnhancedActionParameter,
+    value: any,
+    constraints: ParameterConstraints,
+    errors: ValidationError[],
+    warnings: string[],
+    suggestions: string[]
+  ): void {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return
+
+    const keys = Object.keys(value)
+
+    // Length validation (number of keys)
+    if (constraints.minLength !== undefined && keys.length < constraints.minLength) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must contain at least ${constraints.minLength} entries`,
+        field: parameter.name,
+        severity: 'error'
+      })
+    }
+
+    if (constraints.maxLength !== undefined && keys.length > constraints.maxLength) {
+      errors.push({
+        type: ValidationErrorType.OUT_OF_RANGE,
+        message: `${parameter.name} must contain no more than ${constraints.maxLength} entries`,
+        field: parameter.name,
+        severity: 'error'
+      })
+    }
+  }
+
+  /**
+   * Generic constraint validation for unknown types
+   */
+  private validateGenericConstraints(
+    parameter: EnhancedActionParameter,
+    value: any,
+    constraints: ParameterConstraints,
+    errors: ValidationError[],
+    warnings: string[],
+    suggestions: string[]
+  ): void {
+    // Pattern validation for strings
     if (constraints.pattern && typeof value === 'string') {
       if (!constraints.pattern.test(value)) {
         errors.push({
           type: ValidationErrorType.PATTERN_MISMATCH,
-          message: ERROR_MESSAGES[ValidationErrorType.PATTERN_MISMATCH](
-            parameter.name,
-            constraints.pattern.toString()
-          ),
+          message: `${parameter.name} does not match the required format`,
           field: parameter.name,
           severity: 'error'
         })
@@ -400,27 +756,17 @@ export class ParameterValidator {
     }
 
     // Enum validation
-    if (constraints.enum && !constraints.enum.includes(value)) {
-      errors.push({
-        type: ValidationErrorType.ENUM_VIOLATION,
-        message: ERROR_MESSAGES[ValidationErrorType.ENUM_VIOLATION](parameter.name, constraints.enum),
-        field: parameter.name,
-        severity: 'error'
-      })
-    }
-
-    // Decimal places validation for UFix64
-    if (constraints.decimals !== undefined && parameter.validation?.type === ParameterType.UFIX64) {
-      const decimalPlaces = this.getDecimalPlaces(value)
-      if (decimalPlaces > constraints.decimals) {
-        warnings.push(`${parameter.name} has more than ${constraints.decimals} decimal places`)
+    if (constraints.enum && constraints.enum.length > 0) {
+      if (!constraints.enum.includes(value)) {
+        errors.push({
+          type: ValidationErrorType.ENUM_VIOLATION,
+          message: `${parameter.name} must be one of: ${constraints.enum.join(', ')}`,
+          field: parameter.name,
+          severity: 'error'
+        })
       }
     }
-
-    return { isValid: errors.length === 0, errors, warnings }
   }
-
-
 
   /**
    * Infers ParameterType from string type
@@ -529,5 +875,49 @@ export class ParameterValidator {
       return decimalIndex === -1 ? 0 : value.length - decimalIndex - 1
     }
     return 0
+  }
+
+  /**
+   * Finds similar enum options using simple string similarity
+   */
+  private findSimilarEnumOptions(value: string, enumOptions: string[]): string[] {
+    const lowerValue = value.toLowerCase()
+    const similar: string[] = []
+    
+    for (const option of enumOptions) {
+      const lowerOption = option.toLowerCase()
+      
+      // Check for partial matches or similar strings
+      if (lowerOption.includes(lowerValue) || lowerValue.includes(lowerOption)) {
+        similar.push(option)
+      } else {
+        // Simple Levenshtein-like check for single character differences
+        const distance = this.calculateSimpleDistance(lowerValue, lowerOption)
+        if (distance <= 2 && Math.abs(lowerValue.length - lowerOption.length) <= 2) {
+          similar.push(option)
+        }
+      }
+    }
+    
+    return similar.slice(0, 3) // Return at most 3 suggestions
+  }
+
+  /**
+   * Calculates a simple string distance for suggestion purposes
+   */
+  private calculateSimpleDistance(str1: string, str2: string): number {
+    if (str1.length === 0) return str2.length
+    if (str2.length === 0) return str1.length
+    
+    let distance = 0
+    const maxLength = Math.max(str1.length, str2.length)
+    
+    for (let i = 0; i < maxLength; i++) {
+      if (str1[i] !== str2[i]) {
+        distance++
+      }
+    }
+    
+    return distance
   }
 }

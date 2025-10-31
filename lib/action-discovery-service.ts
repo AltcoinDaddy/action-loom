@@ -707,9 +707,15 @@ export class ActionDiscoveryService {
 }
 
 /**
- * Default Action discovery service instance
+ * Default Action discovery service instance (lazy-loaded)
  */
-export const defaultActionDiscoveryService = new ActionDiscoveryService()
+let _defaultActionDiscoveryService: ActionDiscoveryService | null = null
+export const getDefaultActionDiscoveryService = (): ActionDiscoveryService => {
+  if (!_defaultActionDiscoveryService) {
+    _defaultActionDiscoveryService = new ActionDiscoveryService()
+  }
+  return _defaultActionDiscoveryService
+}
 
 /**
  * Create a new Action discovery service with custom configuration

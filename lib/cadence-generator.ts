@@ -1,5 +1,5 @@
 import type { ParsedWorkflow, ParsedAction, ActionMetadata, ForteAction, EnhancedWorkflow } from "./types"
-import { ActionDiscoveryService, defaultActionDiscoveryService } from "./action-discovery-service"
+import { ActionDiscoveryService, getDefaultActionDiscoveryService } from "./action-discovery-service"
 import { gracefulErrorHandler, ActionDiscoveryError } from "./graceful-error-handler"
 import { logger } from "./logging-service"
 
@@ -20,7 +20,14 @@ export interface CadenceGenerationOptions {
 }
 
 export class CadenceGenerator {
-  private static discoveryService: ActionDiscoveryService = defaultActionDiscoveryService
+  private static _discoveryService: ActionDiscoveryService | null = null
+  
+  private static getDiscoveryService(): ActionDiscoveryService {
+    if (!this._discoveryService) {
+      this._discoveryService = getDefaultActionDiscoveryService()
+    }
+    return this._discoveryService
+  }
   
   /**
    * Generate Cadence transaction code from parsed workflow with enhanced error handling
@@ -426,7 +433,7 @@ ${resourceManagement}
     for (const action of workflow.actions) {
       try {
         // Get Action metadata from discovery service
-        const actionMetadata = await this.discoveryService.getAction(action.id)
+        const actionMetadata = await this.getDiscoveryService().getAction(action.id)
         if (actionMetadata) {
           // Add Action-specific imports
           if (actionMetadata.contractAddress) {
@@ -457,7 +464,7 @@ ${resourceManagement}
     // Add dependency imports
     for (const dep of dependencies) {
       try {
-        const depAction = await this.discoveryService.getAction(dep)
+        const depAction = await this.getDiscoveryService().getAction(dep)
         if (depAction && depAction.contractAddress) {
           imports.add(`import "${depAction.name}" from ${depAction.contractAddress}`)
         }
@@ -480,7 +487,7 @@ ${resourceManagement}
     // Try to get dynamic imports from discovered Actions first
     if (actionId) {
       try {
-        const actionMetadata = await this.discoveryService.getAction(actionId)
+        const actionMetadata = await this.getDiscoveryService().getAction(actionId)
         if (actionMetadata) {
           const imports: string[] = []
           if (actionMetadata.contractAddress) {
@@ -489,7 +496,7 @@ ${resourceManagement}
           // Add dependency imports
           for (const dep of actionMetadata.dependencies) {
             try {
-              const depAction = await this.discoveryService.getAction(dep)
+              const depAction = await this.getDiscoveryService().getAction(dep)
               if (depAction && depAction.contractAddress) {
                 imports.push(`import "${depAction.name}" from ${depAction.contractAddress}`)
               }
@@ -579,7 +586,7 @@ ${resourceManagement}
       let actionMetadata: ActionMetadata | undefined
       
       try {
-        actionMetadata = await this.discoveryService.getAction(action.id)
+        actionMetadata = await this.getDiscoveryService().getAction(action.id)
       } catch (error) {
         logger.warn('Failed to get action metadata for prepare block', {
           component: 'cadence-generator',
@@ -656,7 +663,7 @@ ${resourceManagement}
         let actionMetadata: ActionMetadata | undefined
         
         try {
-          actionMetadata = await this.discoveryService.getAction(action.id)
+          actionMetadata = await this.getDiscoveryService().getAction(action.id)
         } catch (error) {
           logger.warn('Failed to get action metadata for execute block', {
             component: 'cadence-generator',
@@ -700,7 +707,7 @@ ${resourceManagement}
   private static async generateActionSetup(action: ParsedAction): Promise<string> {
     // Try to get dynamic setup from discovered Actions first
     try {
-      const actionMetadata = await this.discoveryService.getAction(action.id)
+      const actionMetadata = await this.getDiscoveryService().getAction(action.id)
       if (actionMetadata) {
         return this.generateForteActionSetup(action, actionMetadata)
       }
@@ -761,7 +768,7 @@ ${resourceManagement}
   private static async generateActionCode(action: ParsedAction): Promise<string> {
     // Try to get dynamic code from discovered Actions first
     try {
-      const actionMetadata = await this.discoveryService.getAction(action.id)
+      const actionMetadata = await this.getDiscoveryService().getAction(action.id)
       if (actionMetadata) {
         return this.generateForteActionCode(action, actionMetadata)
       }
@@ -980,7 +987,7 @@ access(all) fun main(): String {
     
     // Generate queries for each action
     for (const action of workflow.actions) {
-      const actionMetadata = await this.discoveryService.getAction(action.id)
+      const actionMetadata = await this.getDiscoveryService().getAction(action.id)
       if (actionMetadata) {
         lines.push(`  // Query ${action.name}`)
         lines.push(`  result["${action.id}"] = ${actionMetadata.name}.getActionInfo()`)
@@ -1430,7 +1437,7 @@ ${postConditions}
     // Add input sanitization for each action
     for (let i = 0; i < workflow.actions.length; i++) {
       const action = workflow.actions[i]
-      const actionMetadata = await this.discoveryService.getAction(action.id)
+      const actionMetadata = await this.getDiscoveryService().getAction(action.id)
       
       lines.push(`    // Secure Action ${i + 1}: ${action.name}`)
       if (actionMetadata) {
@@ -1531,7 +1538,7 @@ ${postConditions}
     for (const actionId of workflow.executionOrder) {
       const action = workflow.actions.find((a) => a.id === actionId)
       if (action) {
-        const actionMetadata = await this.discoveryService.getAction(action.id)
+        const actionMetadata = await this.getDiscoveryService().getAction(action.id)
         
         lines.push(`    // Secure execution: ${action.name}`)
         if (actionMetadata) {
@@ -1726,7 +1733,7 @@ ${postConditions}
    * Set custom discovery service for testing
    */
   static setDiscoveryService(service: ActionDiscoveryService): void {
-    this.discoveryService = service
+    this._discoveryService = service
   }
 
   /**
@@ -1744,7 +1751,7 @@ ${postConditions}
     let discoveryIssues = 0
     for (const action of workflow.actions) {
       try {
-        const metadata = await this.discoveryService.getAction(action.id)
+        const metadata = await this.getDiscoveryService().getAction(action.id)
         lines.push(`✓ ${action.name} (${action.actionType})`)
         if (metadata) {
           lines.push(`  Contract: ${metadata.contractAddress || 'Unknown'}`)

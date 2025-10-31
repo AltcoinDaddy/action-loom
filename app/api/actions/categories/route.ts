@@ -12,7 +12,8 @@ import {
  * GET /api/actions/categories - Get all available Action categories
  */
 
-const discoveryService = new ActionDiscoveryService()
+// Lazy-load the discovery service to avoid build-time Flow API client creation
+const getDiscoveryService = () => new ActionDiscoveryService()
 
 async function handleGET(): Promise<NextResponse> {
   console.log('Fetching Action categories...')
@@ -35,7 +36,7 @@ async function handleGET(): Promise<NextResponse> {
   }
   
   try {
-    const categories = await discoveryService.getCategories()
+    const categories = await getDiscoveryService().getCategories()
     
     return createSuccessResponse(null, {
       categories,

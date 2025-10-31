@@ -1,4 +1,4 @@
-import { ActionDiscoveryService, defaultActionDiscoveryService } from './action-discovery-service'
+import { ActionDiscoveryService, getDefaultActionDiscoveryService } from './action-discovery-service'
 import { SemanticSearchEngine, SearchResult } from './semantic-search-engine'
 import { 
   ActionMetadata, 
@@ -19,7 +19,7 @@ export class ActionMappingService {
   private discoveryService: ActionDiscoveryService
 
   constructor(discoveryService?: ActionDiscoveryService) {
-    this.discoveryService = discoveryService || defaultActionDiscoveryService
+    this.discoveryService = discoveryService || getDefaultActionDiscoveryService()
   }
 
   /**
@@ -734,9 +734,15 @@ interface ActionInput {
 }
 
 /**
- * Default Action mapping service instance
+ * Default Action mapping service instance (lazy-loaded)
  */
-export const defaultActionMappingService = new ActionMappingService()
+let _defaultActionMappingService: ActionMappingService | null = null
+export const getDefaultActionMappingService = (): ActionMappingService => {
+  if (!_defaultActionMappingService) {
+    _defaultActionMappingService = new ActionMappingService()
+  }
+  return _defaultActionMappingService
+}
 
 /**
  * Create a new Action mapping service with custom discovery service

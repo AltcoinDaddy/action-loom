@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -44,13 +44,53 @@ export function ParameterConfigPanel({
   allParameterValues,
   onClose
 }: ParameterConfigPanelProps) {
+  // Debug logging
+  console.log('ParameterConfigPanel received action:', action)
+  console.log('Action parameters:', action.parameters)
+  console.log('Action metadata:', action)
   const [validationResults, setValidationResults] = useState<ActionValidationResult | null>(null)
   const [parameterValidations, setParameterValidations] = useState<Record<string, ParameterValidationResult>>({})
   const [showDependencies, setShowDependencies] = useState(false)
+  const [localValues, setLocalValues] = useState<Record<string, any>>(currentValues)
+
+  // Track if there are unsaved changes
+  const hasUnsavedChanges = Object.keys(localValues).some(
+    key => localValues[key] !== currentValues[key]
+  )
 
   const validator = new ParameterValidator()
 
-  // Validate parameters whenever values change
+  // Sync local values with prop changes
+  useEffect(() => {
+    setLocalValues(currentValues)
+  }, [currentValues])
+
+  // Enhanced parameter change handler with state synchronization
+  const handleParameterChange = useCallback((parameterName: string, value: any) => {
+    // Update local state immediately for responsive UI
+    setLocalValues(prev => ({
+      ...prev,
+      [parameterName]: value
+    }))
+
+    // Debounce the parent state update to prevent excessive re-renders
+    const timeoutId = setTimeout(() => {
+      try {
+        onParameterChange(parameterName, value)
+      } catch (error) {
+        console.error('Error in onParameterChange:', error)
+        // Revert local state on error
+        setLocalValues(prev => ({
+          ...prev,
+          [parameterName]: currentValues[parameterName]
+        }))
+      }
+    }, 100)
+
+    return () => clearTimeout(timeoutId)
+  }, [onParameterChange, currentValues])
+
+  // Validate parameters whenever values change (use localValues for immediate feedback)
   useEffect(() => {
     if (!workflow || !currentAction) return
 
@@ -60,7 +100,9 @@ export function ParameterConfigPanel({
       availableOutputs
     }
 
-    const result = validator.validateAllParameters(action, currentValues, context)
+    // Use localValues for immediate validation feedback
+    const valuesToValidate = { ...currentValues, ...localValues }
+    const result = validator.validateAllParameters(action, valuesToValidate, context)
     setValidationResults(result)
 
     // Update individual parameter validations
@@ -76,13 +118,13 @@ export function ParameterConfigPanel({
           type: parameter.type as any // Cast to avoid type mismatch
         }
       }
-      const paramResult = validator.validateParameter(enhancedParameter, currentValues[parameter.name], context)
+      const paramResult = validator.validateParameter(enhancedParameter, valuesToValidate[parameter.name], context)
       newParameterValidations[parameter.name] = paramResult
     }
 
     setParameterValidations(newParameterValidations)
 
-    // Notify parent of validation changes
+    // Notify parent of validation changes (but only with persisted values)
     const allErrors = Object.values(newParameterValidations)
       .flatMap(validation => validation.errors)
       .concat(result.warnings.map(warning => ({
@@ -91,8 +133,57 @@ export function ParameterConfigPanel({
         severity: 'warning' as const
       })))
 
-    onValidationChange(result.isValid, allErrors)
-  }, [action, currentValues, workflow, currentAction, availableOutputs, onValidationChange])
+    // Use a debounced validation update to prevent excessive parent updates
+    const timeoutId = setTimeout(() => {
+      onValidationChange(result.isValid, allErrors)
+    }, 150)
+
+    return () => clearTimeout(timeoutId)
+  }, [action, currentValues, localValues, workflow, currentAction, availableOutputs, onValidationChange])
+
+  // Handle close with unsaved changes
+  const handleClose = useCallback(() => {
+    if (hasUnsavedChanges) {
+      const shouldClose = window.confirm(
+        'You have unsaved changes. Are you sure you want to close without applying them?'
+      )
+      if (!shouldClose) return
+    }
+    onClose?.()
+  }, [hasUnsavedChanges, onClose])
+
+  // Handle apply and close
+  const handleApply = useCallback(() => {
+    // Apply all current values and close
+    Object.entries(localValues).forEach(([paramName, value]) => {
+      if (value !== currentValues[paramName]) {
+        onParameterChange(paramName, value)
+      }
+    })
+    onClose?.()
+  }, [localValues, currentValues, onParameterChange, onClose])
+
+  // Handle keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Ctrl/Cmd + Enter to apply and close
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault()
+        if (validationResults?.isValid) {
+          handleApply()
+        }
+      }
+
+      // Escape to close (with confirmation if unsaved changes)
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        handleClose()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [validationResults?.isValid, handleApply, handleClose])
 
 
 
@@ -136,9 +227,20 @@ export function ParameterConfigPanel({
           <div className="flex items-center gap-2">
             <Settings className="h-5 w-5 text-primary" />
             <CardTitle className="text-lg">Configure Parameters</CardTitle>
+            {hasUnsavedChanges && (
+              <div className="flex items-center gap-1 text-xs text-orange-600">
+                <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse" />
+                <span>Unsaved changes</span>
+              </div>
+            )}
           </div>
           {onClose && (
-            <Button variant="ghost" size="icon" onClick={onClose}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleClose}
+              title={hasUnsavedChanges ? "Close without saving changes" : "Close"}
+            >
               <X className="h-4 w-4" />
             </Button>
           )}
@@ -214,6 +316,13 @@ export function ParameterConfigPanel({
 
             {/* Parameter Inputs */}
             <div className="space-y-4">
+              {/* Debug info - remove this after fixing */}
+              {process.env.NODE_ENV === 'development' && (
+                <div className="p-2 bg-blue-50 border border-blue-200 rounded text-xs">
+                  <strong>Debug:</strong> Found {action.parameters.length} parameters: {action.parameters.map(p => p.name).join(', ')}
+                </div>
+              )}
+
               {action.parameters.map((parameter) => {
                 const validation = parameterValidations[parameter.name]
                 const validationIcon = getValidationIcon(parameter.name)
@@ -244,8 +353,8 @@ export function ParameterConfigPanel({
 
                     <ParameterInput
                       parameter={parameter}
-                      value={currentValues[parameter.name]}
-                      onChange={(value) => onParameterChange(parameter.name, value)}
+                      value={localValues[parameter.name] ?? currentValues[parameter.name]}
+                      onChange={(value) => handleParameterChange(parameter.name, value)}
                       validation={validation}
                       availableOutputs={availableOutputs}
                       suggestions={validation?.suggestions || []}
@@ -318,6 +427,86 @@ export function ParameterConfigPanel({
           </div>
         </div>
       </CardContent>
+
+      {/* Footer with action buttons */}
+      <div className="border-t border-border p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            {validationResults && (
+              <>
+                {validationResults.isValid ? (
+                  <div className="flex items-center gap-1 text-green-600">
+                    <CheckCircle className="h-4 w-4" />
+                    <span>Configuration complete</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 text-destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span>
+                      {validationResults.missingParameters.length > 0 &&
+                        `${validationResults.missingParameters.length} missing`}
+                      {validationResults.missingParameters.length > 0 &&
+                        Object.keys(validationResults.invalidParameters).length > 0 && ', '}
+                      {Object.keys(validationResults.invalidParameters).length > 0 &&
+                        `${Object.keys(validationResults.invalidParameters).length} invalid`}
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {onClose && (
+              <Button
+                variant="outline"
+                onClick={handleClose}
+                className="min-w-[80px]"
+                title={hasUnsavedChanges ? "Cancel (will lose unsaved changes)" : "Cancel"}
+              >
+                Cancel
+              </Button>
+            )}
+            <Button
+              onClick={handleApply}
+              disabled={validationResults ? !validationResults.isValid : false}
+              className={`min-w-[80px] ${validationResults?.isValid
+                ? 'bg-primary hover:bg-primary/90'
+                : 'bg-destructive hover:bg-destructive/90'
+                }`}
+              title={
+                validationResults && !validationResults.isValid
+                  ? `Please fix validation errors: ${validationResults.missingParameters.join(', ')}`
+                  : 'Apply configuration and close (Ctrl+Enter)'
+              }
+            >
+              {validationResults?.isValid ? 'Apply' : 'Fix Errors'}
+            </Button>
+          </div>
+        </div>
+
+        {/* Quick help text */}
+        <div className="mt-3 text-xs text-muted-foreground">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1">
+              <Info className="h-3 w-3" />
+              <span>
+                Changes are saved automatically. Click "Apply" to finish configuration.
+              </span>
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <span className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">Ctrl+Enter</kbd>
+                <span>Apply</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">Esc</kbd>
+                <span>Cancel</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
     </Card>
   )
 }

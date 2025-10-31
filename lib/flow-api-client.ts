@@ -982,6 +982,12 @@ export function createFlowAPIClient(
 }
 
 /**
- * Default Flow API client instance for testnet
+ * Get default Flow API client instance for testnet (lazy-loaded)
  */
-export const defaultFlowClient = createFlowAPIClient('testnet')
+let _defaultFlowClient: FlowAPIClient | null = null
+export const getDefaultFlowClient = (): FlowAPIClient => {
+  if (!_defaultFlowClient) {
+    _defaultFlowClient = createFlowAPIClient('testnet')
+  }
+  return _defaultFlowClient
+}

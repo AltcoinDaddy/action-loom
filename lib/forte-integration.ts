@@ -9,7 +9,7 @@
 export * from './types'
 
 // Flow API client
-export { FlowAPIClient, createFlowAPIClient, defaultFlowClient } from './flow-api-client'
+export { FlowAPIClient, createFlowAPIClient, getDefaultFlowClient } from './flow-api-client'
 
 // Action discovery interfaces and implementations
 export type {

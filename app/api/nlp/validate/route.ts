@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ActionMappingService, ActionMappingError } from '@/lib/action-mapping-service'
-import { defaultActionDiscoveryService } from '@/lib/action-discovery-service'
+import { getDefaultActionDiscoveryService } from '@/lib/action-discovery-service'
 
 /**
  * POST /api/nlp/validate
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
 
     if (actionId) {
       // Validate against specific Action
-      actionMetadata = await defaultActionDiscoveryService.getAction(actionId)
+      actionMetadata = await getDefaultActionDiscoveryService().getAction(actionId)
       
       if (!actionMetadata) {
         return NextResponse.json(

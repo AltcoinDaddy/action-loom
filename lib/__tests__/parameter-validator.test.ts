@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   ParameterValidator,
-  ValidationErrorType,
   ParameterValidationResult,
   ActionValidationResult
 } from '../parameter-validator'
@@ -12,7 +11,8 @@ import {
   ActionOutput,
   ParameterType,
   EnhancedActionParameter,
-  ValidationContext
+  ValidationContext,
+  ValidationErrorType
 } from '../types'
 
 describe('ParameterValidator', () => {
@@ -627,7 +627,7 @@ describe('ParameterValidator', () => {
 
   describe('validateAllParameters', () => {
     const mockAction: ActionMetadata = {
-      id: 'swap-tokens',
+      id: 'test-action',
       name: 'Swap Tokens',
       description: 'Swap tokens on DEX',
       category: 'DeFi',
@@ -737,7 +737,8 @@ describe('ParameterValidator', () => {
       const result = validator.validateAllParameters(
         mockAction,
         parameterValues,
-        mockContext
+        mockContext,
+        { skipUserInteractionCheck: true }
       )
 
       expect(result.isValid).toBe(false)

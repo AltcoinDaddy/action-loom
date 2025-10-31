@@ -13,7 +13,7 @@ import {
  * GET /api/actions/suggestions - Get search suggestions for autocomplete
  */
 
-const discoveryService = new ActionDiscoveryService()
+const getDiscoveryService = () => new ActionDiscoveryService()
 
 async function handleGET(request: Request): Promise<NextResponse> {
   const { searchParams } = new URL(request.url)
@@ -67,7 +67,7 @@ async function handleGET(request: Request): Promise<NextResponse> {
   }
   
   try {
-    const suggestions = await discoveryService.getSearchSuggestions(query, limit)
+    const suggestions = await getDiscoveryService().getSearchSuggestions(query, limit)
     
     return createSuccessResponse(null, {
       query,

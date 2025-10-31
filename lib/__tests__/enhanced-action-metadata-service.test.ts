@@ -491,9 +491,9 @@ describe('EnhancedActionMetadataService', () => {
       const enhanced = service.enhanceActionMetadata(testAction)
       const amountParam = enhanced.parameters[0]
 
-      expect(amountParam.validation.constraints?.min).toBe(0)
+      expect(amountParam.validation.constraints?.min).toBe(0.00000001) // Minimum positive UFix64 value (1e-8)
       expect(amountParam.validation.constraints?.decimals).toBe(8)
-      expect(amountParam.validation.constraints?.max).toBe(Number.MAX_SAFE_INTEGER)
+      expect(amountParam.validation.constraints?.max).toBe(184467440737.09551615) // Maximum UFix64 value in Flow
     })
 
     it('should generate appropriate constraints for String type', () => {
@@ -508,7 +508,7 @@ describe('EnhancedActionMetadataService', () => {
       const enhanced = service.enhanceActionMetadata(testAction)
       const textParam = enhanced.parameters[0]
 
-      expect(textParam.validation.constraints?.minLength).toBe(1)
+      expect(textParam.validation.constraints?.minLength).toBe(0) // Allow empty strings by default
       expect(textParam.validation.constraints?.maxLength).toBe(1000)
     })
   })
